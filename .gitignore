@@ -1,0 +1,15 @@
+assets/upload/
+lib/storage/
+node_modules
+lib//storage/*.key
+lib/vendor
+.env
+.env.backup
+.phpunit.result.cache
+/.idea/workspace.xml
+/.idea
+Homestead.json
+Homestead.yaml
+npm-debug.log
+yarn-error.log
+assets/ckfinder/uploads/

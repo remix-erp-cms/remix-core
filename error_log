@@ -1,0 +1,16 @@
+[16-Jun-2020 22:09:44 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:09:44 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34
+[16-Jun-2020 22:12:13 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:12:13 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34
+[16-Jun-2020 22:12:15 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:12:15 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34
+[16-Jun-2020 22:12:16 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:12:16 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34
+[16-Jun-2020 22:12:16 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:12:16 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34
+[16-Jun-2020 22:12:17 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:12:17 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34
+[16-Jun-2020 22:14:55 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:14:55 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34
+[16-Jun-2020 22:15:02 Asia/Bangkok] PHP Warning:  Unsupported declare 'strict_types' in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 14
+[16-Jun-2020 22:15:02 Asia/Bangkok] PHP Parse error:  syntax error, unexpected '?', expecting variable (T_VARIABLE) in /home/vient397/public_html/lib/vendor/ramsey/uuid/src/functions.php on line 34

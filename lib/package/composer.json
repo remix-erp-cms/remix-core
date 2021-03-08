@@ -1,0 +1,14 @@
+{
+    "name": "box/entity",
+    "description": "my create  entity",
+    "type": "library",
+    "license": "1.0.0",
+    "authors": [
+        {
+            "name": "Nguyen Quoc Truong",
+            "email": "truong.nq@aris-vn.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {}
+}
