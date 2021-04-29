@@ -57,15 +57,19 @@ Route::middleware([])->group(function () {
         Route::get('/order/detail/{id}', 'OrderController@detail')->name('api.sell.order.detail');
         Route::get('/order/create-init/{id}', 'OrderController@createInit')->name('api.sell.order.create.init');
         Route::post('/order', 'OrderController@create')->name('api.sell.order.post');
-        Route::put('/order/{id}', 'OrderController@update')->name('api.sell.order.update');
+//        Route::put('/order/{id}', 'OrderController@update')->name('api.sell.order.update');
         Route::put('/order/{id}/request-approve', 'OrderController@pending')->name('api.sell.order.pending');
         Route::put('/order/{id}/approve', 'OrderController@approve')->name('api.sell.order.approve');
         Route::put('/order/{id}/reject', 'OrderController@reject')->name('api.sell.order.reject');
         Route::put('/order/{id}/accountant/approve', 'OrderController@accountantApprove')
             ->name('api.sell.order.accountant.approve');
+        Route::put('/order/update/status', 'OrderController@changeStatus')
+            ->name('api.sell.order.update.status');
         Route::put('/order/{id}/accountant/reject', 'OrderController@accountantReject')
             ->name('api.sell.order.accountant.reject');
-        Route::delete('/order/{id}', 'OrderController@delete')->name('api.sell.order.delete');
+//        Route::delete('/order/{id}', 'OrderController@delete')->name('api.sell.order.delete');
+        Route::post('/order/import-data', 'OrderController@importData')
+            ->name('api.sell.order.import.data');
 
         // price quote
         Route::get('/price-quote/list', 'PriceQuoteController@list')->name('api.sell.price.quote.list');
@@ -79,6 +83,8 @@ Route::middleware([])->group(function () {
         Route::put('/price-quote/{id}/reject', 'PriceQuoteController@reject')->name('api.sell.price.quote.reject');
         Route::put('/price-quote/{id}/accountant/approve', 'PriceQuoteController@accountantApprove')
             ->name('api.sell.price.quote.accountant.approve');
+        Route::put('/price-quote/update/status', 'PriceQuoteController@changeStatus')
+            ->name('api.sell.price.quote.update.status');
         Route::put('/price-quote/{id}/accountant/reject', 'PriceQuoteController@accountantReject')
             ->name('api.sell.price.quote.accountant.reject');
         Route::delete('/price-quote/{id}', 'PriceQuoteController@delete')->name('api.sell.price.quote.delete');
@@ -103,16 +109,26 @@ Route::middleware([])->group(function () {
         Route::put('/delivery/{id}/pending', 'DeliveryController@pending')->name('api.sell.delivery.pending');
         Route::put('/delivery/{id}/approve', 'DeliveryController@approve')->name('api.sell.delivery.approve');
         Route::put('/delivery/{id}/reject', 'DeliveryController@reject')->name('api.sell.delivery.reject');
+        Route::put('/delivery/update/status', 'DeliveryController@changeStatus')
+            ->name('api.sell.delivery.update.status');
         Route::delete('/delivery/{id}', 'DeliveryController@delete')->name('api.sell.delivery.delete');
     });
 
+    // pos
+    Route::group(['prefix' => 'sell-pos', 'namespace' => 'SellPos'], function () {
+        // order
+        Route::get('/order/list', 'OrderController@list')->name('api.sell.pos.order.list');
+        Route::get('/order/detail/{id}', 'OrderController@detail')->name('api.sell.pos.order.detail');
+        Route::post('/order', 'OrderController@create')->name('api.sell.pos.order.post');
+        Route::delete('/order/{id}', 'OrderController@delete')->name('api.sell.pos.order.delete');
+    });
 
     // purchase
     Route::group(['prefix' => 'purchase', 'namespace' => 'Purchase'], function () {
         // order
         Route::get('/order/list', 'OrderController@list')->name('api.purchase.order.list');
         Route::get('/order/detail/{id}', 'OrderController@detail')->name('api.purchase.order.detail');
-        Route::get('/order/create-init/{id}', 'OrderController@createInit')->name('api.purchase.order.create.init');
+        Route::get('/order/create-init', 'OrderController@createInit')->name('api.purchase.order.create.init');
         Route::post('/order', 'OrderController@create')->name('api.purchase.order.post');
         Route::put('/order/{id}', 'OrderController@update')->name('api.purchase.order.update');
         Route::put('/order/{id}/request-approve', 'OrderController@pending')->name('api.purchase.order.pending');
@@ -122,7 +138,11 @@ Route::middleware([])->group(function () {
             ->name('api.purchase.order.accountant.approve');
         Route::put('/order/{id}/accountant/reject', 'OrderController@accountantReject')
             ->name('api.purchase.order.accountant.reject');
+        Route::put('/order/update/status', 'OrderController@changeStatus')
+            ->name('api.purchase.order.update.status');
         Route::delete('/order/{id}', 'OrderController@delete')->name('api.purchase.order.delete');
+        Route::post('/order/import-data', 'OrderController@importData')
+            ->name('api.purchase.order.import.data');
 
         // invoice
         Route::get('/invoice/list', 'InvoiceController@list')
@@ -160,6 +180,8 @@ Route::middleware([])->group(function () {
         Route::put('/delivery/{id}/pending', 'DeliveryController@pending')->name('api.purchase.delivery.pending');
         Route::put('/delivery/{id}/approve', 'DeliveryController@approve')->name('api.purchase.delivery.approve');
         Route::put('/delivery/{id}/reject', 'DeliveryController@reject')->name('api.purchase.delivery.reject');
+        Route::put('/delivery/update/status', 'DeliveryController@changeStatus')
+            ->name('api.purchase.delivery.update.status');
         Route::delete('/delivery/{id}', 'DeliveryController@delete')->name('api.purchase.delivery.delete');
     });
 
@@ -167,20 +189,31 @@ Route::middleware([])->group(function () {
     Route::group(['prefix' => 'debt', 'namespace' => 'Debt'], function () {
         // customer
         Route::get('/customer/list', 'DebtCustomerController@list')->name('api.debt.customer.list');
-        Route::get('/customer/list-order', 'DebtCustomerController@listOrder')->name('api.debt.customer.list.order');
+        Route::get('/customer/list-order', 'DebtCustomerController@listOrder')
+            ->name('api.debt.customer.list.order');
+        Route::get('/customer/list-product', 'DebtCustomerController@listProduct')
+            ->name('api.debt.customer.list.product');
         Route::get('/customer/detail/{id}', 'DebtCustomerController@detail')->name('api.debt.customer.detail');
         Route::get('/customer/create-init/{id}', 'DebtCustomerController@createInit')->name('api.debt.customer.create.init');
         Route::post('/customer', 'DebtCustomerController@create')->name('api.debt.customer.post');
+        Route::post('/customer/pay-all', 'DebtCustomerController@paymentAll')
+            ->name('api.debt.customer.pay.all');
         Route::put('/customer/{id}', 'DebtCustomerController@update')->name('api.customer.order.update');
-        Route::delete('/order/{id}', 'OrderController@delete')->name('api.debt.customer.delete');
+        Route::delete('/order/{id}', 'DebtSupplierController@delete')->name('api.debt.customer.delete');
 
         // supplier
         Route::get('/supplier/list', 'DebtSupplierController@list')->name('api.debt.supplier.list');
+        Route::get('/supplier/list-order', 'DebtSupplierController@listOrder')->name('api.debt.supplier.list.order');
+        Route::get('/supplier/list-product', 'DebtSupplierController@listProduct')
+            ->name('api.debt.supplier.list.product');
         Route::get('/supplier/detail/{id}', 'DebtSupplierController@detail')->name('api.debt.supplier.detail');
         Route::get('/supplier/create-init/{id}', 'DebtSupplierController@createInit')->name('api.debt.supplier.create.init');
         Route::post('/supplier', 'DebtSupplierController@create')->name('api.debt.supplier.post');
+        Route::post('/supplier/pay-all', 'DebtSupplierController@paymentAll')
+            ->name('api.debt.supplier.pay.all');
         Route::put('/supplier/{id}', 'DebtSupplierController@update')->name('api.supplier.order.update');
-        Route::delete('/supplier/{id}', 'DebtSupplierController@delete')->name('api.debt.supplier.delete');
+        Route::delete('/order/{id}', 'DebtSupplierController@delete')->name('api.debt.supplier.delete');
+
     });
 
 
@@ -196,6 +229,8 @@ Route::middleware([])->group(function () {
         Route::put('/order/{id}/request-approve', 'OrderController@pending')->name('api.purchase.request.order.pending');
         Route::put('/order/{id}/approve', 'OrderController@approve')->name('api.purchase.request.order.approve');
         Route::put('/order/{id}/reject', 'OrderController@reject')->name('api.purchase.request.order.reject');
+        Route::put('/order/update/status', 'OrderController@changeStatus')
+            ->name('api.purchase.request.order.change.status');
         Route::delete('/order/{id}', 'OrderController@delete')->name('api.purchase.request.order.delete');
     });
 
@@ -216,6 +251,8 @@ Route::middleware([])->group(function () {
             ->name('api.purchase.return.accountant.approve');
         Route::put('/order/{id}/accountant/reject', 'OrderController@accountantReject')
             ->name('api.purchase.return.accountant.reject');
+        Route::put('/order/update/status', 'OrderController@changeStatus')
+            ->name('api.purchase.return.update.status');
         Route::delete('/order/{id}', 'OrderController@delete')->name('api.purchase.return.order.delete');
     });
 
@@ -235,6 +272,8 @@ Route::middleware([])->group(function () {
             ->name('api.sell.return.accountant.approve');
         Route::put('/order/{id}/accountant/reject', 'OrderController@accountantReject')
             ->name('api.sell.return.accountant.reject');
+        Route::put('/order/update/status', 'OrderController@changeStatus')
+            ->name('api.sell.return.update.status');
         Route::delete('/order/{id}', 'OrderController@delete')->name('api.sell.return.order.delete');
     });
 
@@ -268,8 +307,12 @@ Route::middleware([])->group(function () {
             ->name('api.product.detail');
         Route::post('/product', 'ProductController@create')
             ->name('api.product.post');
+        Route::post('/product/import-data', 'ProductController@importData')
+            ->name('api.product.import.data');
         Route::put('/product/{id}', 'ProductController@update')
             ->name('api.product.update');
+        Route::put('/product', 'ProductController@updateStatus')
+            ->name('api.product.update.status');
         Route::delete('/product/{id}', 'ProductController@delete')
             ->name('api.product.delete');
     });
@@ -298,6 +341,8 @@ Route::middleware([])->group(function () {
             ->name('api.category.detail');
         Route::post('/category', 'CategoryController@create')
             ->name('api.category.post');
+        Route::post('/category/import-data', 'CategoryController@importData')
+            ->name('api.category.import.data');
         Route::put('/category/{id}', 'CategoryController@update')
             ->name('api.category.update');
         Route::delete('/category/{id}', 'CategoryController@delete')
@@ -315,6 +360,8 @@ Route::middleware([])->group(function () {
             ->name('api.brand.post');
         Route::put('/brand/{id}', 'BrandController@update')
             ->name('api.brand.update');
+        Route::post('/brand/import-data', 'BrandController@importData')
+            ->name('api.brand.import.data');
         Route::delete('/brand/{id}', 'BrandController@delete')
             ->name('api.brand.delete');
     });
@@ -345,6 +392,8 @@ Route::middleware([])->group(function () {
             ->name('api.unit.detail');
         Route::post('/unit', 'UnitController@create')
             ->name('api.unit.post');
+        Route::post('/unit/import-data', 'UnitController@importData')
+            ->name('api.unit.import.data');
         Route::put('/unit/{id}', 'UnitController@update')
             ->name('api.unit.update');
         Route::delete('/unit/{id}', 'UnitController@delete')
@@ -439,7 +488,11 @@ Route::middleware([])->group(function () {
         Route::post('/create', 'AjaxController@create')->name('api.contact.post');
         Route::put('/update/{id}', 'AjaxController@update')->name('api.contact.update');
         Route::delete('/delete/{id}', 'AjaxController@delete')->name('api.contact.delete');
+    });
 
+    Route::group(['namespace' => 'Contact'], function () {
+        Route::post('/customer/import-data', 'AjaxController@importDataCustomer')->name('api.customer.import.data');
+        Route::post('/supplier/import-data', 'AjaxController@importDataSupplier')->name('api.supplier.import.data');
     });
 
     // common
@@ -497,8 +550,10 @@ Route::middleware([])->group(function () {
             ->name('api.menu.detail');
         Route::post('/menu', 'MenuController@create')
             ->name('api.menu.post');
-        Route::put('/menu/{id}', 'MenuController@update')
+        Route::put('/menu/update/{id}', 'MenuController@update')
             ->name('api.menu.update');
+        Route::put('/menu/update-node', 'MenuController@updateNode')
+            ->name('api.menu.update.node');
         Route::delete('/menu/{id}', 'MenuController@delete')
             ->name('api.menu.delete');
     });

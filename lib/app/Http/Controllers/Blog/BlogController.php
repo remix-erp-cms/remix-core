@@ -42,7 +42,10 @@ class BlogController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
 
             $blogs = Blog::where('business_id', $business_id)
-            ->with(["category", "created_by"]);
+            ->with([
+                "category",
+                "created_by:id,first_name,username,email,contact_number"
+            ]);
 
             if (isset($request->keyword) && $request->keyword) {
                 $blogs->where("title", "LIKE", "%$request->keyword%");

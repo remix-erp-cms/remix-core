@@ -295,9 +295,9 @@ class PriceQuoteController extends Controller
             $ref_count = $this->productUtil->setAndGetReferenceCount($transaction_data['type'], $business_id);
 
             //Generate reference number
-//            if (empty($transaction_data['ref_no'])) {
-//                $transaction_data['ref_no'] = $this->productUtil->generateReferenceNumber($transaction_data['type'], $ref_count);
-//            }
+            if (empty($transaction_data['invoice_no'])) {
+                $transaction_data['invoice_no'] = $this->productUtil->generateReferenceNumber($transaction_data['type'], $ref_count, $business_id, "BG");
+            }
 
             $discount = null;
 
@@ -414,10 +414,12 @@ class PriceQuoteController extends Controller
         }
     }
 
-    public function change_status(Request $request, $id)
+    public function changeStatus(Request $request)
     {
         try {
-            if (!isset($id) || !$id) {
+            $ids = $request->ids;
+
+            if (!isset($ids) || count($ids) === 0) {
                 $res = [
                     'status' => 'danger',
                     'msg' => "Không tìm thấy đơn hàng"
@@ -436,21 +438,11 @@ class PriceQuoteController extends Controller
             ];
 
             $transaction = DB::table('transactions')
-                ->where('id', $id)
+                ->whereIn('id', $ids)
                 ->update($dataUpdate);
 
-            $dataLog = [
-                'created_by' => $user_id,
-                'business_id' => $business_id,
-                'log_name' => "Cập nhật trạng thái cầu mua hàng",
-                'subject_id' => $transaction->id
-            ];
-
-            $message = "Chuyển trạng thái mua hàng thành " . $status;
-
-            Activity::history($message, "purchase_request", $dataLog);
-
             DB::commit();
+
 
             return $this->respondSuccess($transaction);
         } catch (\Exception $e) {
@@ -527,14 +519,6 @@ class PriceQuoteController extends Controller
             $user_id = Auth::guard('api')->user()->id;
 
             $transaction = Transaction::findOrFail($id);
-
-            if (isset($transaction->ref_no) && is_numeric($transaction->ref_no)) {
-                $order = Transaction::findOrFail($transaction->ref_no);
-                if ($order && $order->id) {
-                    $order->status = "complete";
-                    $order->save();
-                }
-            }
 
             $transaction->status = "approve";
 

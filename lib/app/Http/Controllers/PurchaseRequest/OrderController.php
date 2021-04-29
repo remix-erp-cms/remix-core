@@ -61,12 +61,22 @@ class OrderController extends Controller
     {
         try {
             $business_id = Auth::guard('api')->user()->business_id;
+            $location_id = $request->location_id;
             $stock_id = $request->stock_id;
             $user_id = Auth::guard('api')->user()->id;
 
 
-            $purchases = $this->transactionUtil->getListPurchasesRequest($business_id);
-            $purchases->where('transactions.stock_id', $stock_id);
+            $purchases = Transaction::with([
+                'contact:id,name,mobile,email,tax_number,type',
+                'sales_person:id,first_name,user_type',
+                'pending_by:id,first_name,user_type',
+                'approve_by:id,first_name,user_type',
+                'reject_by:id,first_name,user_type',
+                'complete_by:id,first_name,user_type'
+            ])
+                ->where('transactions.type', 'purchase_request')
+                ->where('transactions.location_id', $location_id)
+                ->where('transactions.business_id', $business_id);
 
             if (!empty(request()->supplier_id)) {
                 $purchases->where('contacts.id', request()->supplier_id);
@@ -100,11 +110,6 @@ class OrderController extends Controller
             $purchases->whereDate('transactions.transaction_date', '>=', $start)
                 ->whereDate('transactions.transaction_date', '<=', $end);
 
-            $status = request()->status;
-
-            if (!empty($status)) {
-                $purchases->where('transactions.status', $status);
-            }
 
             $shipping_status = request()->shipping_status;
 
@@ -187,6 +192,21 @@ class OrderController extends Controller
             $transaction_data['type'] = 'purchase_request';
             $transaction_data['payment_status'] = 'payment_pending';
             $transaction_data['status'] = 'ordered';
+            if (!empty($request->status)) {
+                $transaction_data['status'] = $request->status;
+                if ($request->status === "approve") {
+                    $transaction_data['approve_by'] = $user_id;
+                }
+
+                if ($request->status === "pending") {
+                    $transaction_data['pending_by'] = $user_id;
+                }
+
+                if ($request->status === "reject") {
+                    $transaction_data['reject_by'] = $user_id;
+                }
+            }
+
             $transaction_data["transaction_date"] = Carbon::createFromFormat('d/m/Y', $transaction_data["transaction_date"]);
 
             //Update reference count
@@ -194,7 +214,7 @@ class OrderController extends Controller
 
             //Generate reference number
             if (empty($transaction_data['invoice_no'])) {
-                $transaction_data['invoice_no'] = $this->productUtil->generateReferenceNumber($transaction_data['type'], $ref_count);
+                $transaction_data['invoice_no'] = $this->productUtil->generateReferenceNumber($transaction_data['type'], $ref_count, $business_id, "YCMH");
             }
 
             $transaction = Transaction::create($transaction_data);
@@ -226,56 +246,75 @@ class OrderController extends Controller
 
     public function detail($id)
     {
-     try {
-         $business_id = Auth::guard('api')->user()->business_id;
-         $user_id = Auth::guard('api')->user()->id;
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
 
-        $purchase = Transaction::where('business_id', $business_id)
-            ->where('id', $id)
-            ->with(
-                'contact',
-                'purchase_lines',
-                'purchase_lines.product:id,sku,name,contact_id,unit_id',
-                'purchase_lines.product.contact:id,name',
-                'purchase_lines.product.unit:id,actual_name',
-                'purchase_lines.variations',
-                'purchase_lines.variations.product_variation',
-                'purchase_lines.sub_unit',
-                'location:id,name,landmark,mobile',
-                'payment_lines',
-                'tax'
-            )
-            ->select([
-                'transactions.id',
-                'transactions.type',
-                'transactions.ref_no',
-                'transactions.transaction_date',
-                'transactions.invoice_no',
-                'transactions.status',
-                'transactions.stock_id',
-                'transactions.location_id',
-                'transactions.business_id',
-                'transactions.reject_by',
-                'transactions.updated_by',
-                'transactions.complete_by',
-                'transactions.approve_by',
-                'transactions.created_at',
-                'transactions.final_total',
-                'transactions.tax_amount',
-                'transactions.tax_id',
-                'transactions.staff_note',
-                'transactions.discount_amount',
-                'transactions.discount_type'
-            ])
-            ->firstOrFail();
+            $purchase = Transaction::where('business_id', $business_id)
+                ->where('id', $id)
+                ->with(
+                    'contact',
+                    'stock:id,stock_name,stock_type,location_id',
+                    'stock.location:id,name,landmark',
+                    'purchase_lines',
+                    'purchase_lines.product:id,sku,barcode,name,contact_id,unit_id,enable_sr_no',
+                    'purchase_lines.product.contact:id,name',
+                    'purchase_lines.product.unit:id,actual_name',
+                    'purchase_lines.product.stock_products:id,product_id,stock_id,purchase_price,unit_price,quantity,status',
+                    'purchase_lines.variations',
+                    'purchase_lines.variations.product_variation',
+                    'purchase_lines.sub_unit',
+                    'location:id,name,landmark,mobile',
+                    'payment_lines',
+                    'tax',
+                    'sales_person:id,username,first_name,last_name,contact_number,email',
+                    'pending_by:id,first_name,user_type',
+                    'approve_by:id,first_name,user_type',
+                    'reject_by:id,first_name,user_type',
+                    'complete_by:id,first_name,user_type'
+                )
+                ->select([
+                    'transactions.id',
+                    'transactions.type',
+                    'transactions.ref_no',
+                    'transactions.transaction_date',
+                    'transactions.invoice_no',
+                    'transactions.status',
+                    'transactions.shipping_status',
+                    'transactions.res_order_status',
+                    'transactions.receipt_status',
+                    'transactions.payment_status',
+                    'transactions.stock_id',
+                    'transactions.contact_id',
+                    'transactions.location_id',
+                    'transactions.business_id',
+                    'transactions.created_by',
+                    'transactions.reject_by',
+                    'transactions.updated_by',
+                    'transactions.complete_by',
+                    'transactions.approve_by',
+                    'transactions.pending_by',
+                    'transactions.created_at',
+                    'transactions.total_before_tax',
+                    'transactions.final_total',
+                    'transactions.tax_amount',
+                    'transactions.tax_id',
+                    'transactions.staff_note',
+                    'transactions.discount_amount',
+                    'transactions.discount_type',
+                    'transactions.service_custom_field_1',
+                    'transactions.service_custom_field_2',
+                    'transactions.shipping_address',
+                ])
+                ->firstOrFail();
 
-         return $this->respondSuccess($purchase);
-     } catch (\Exception $e) {
-         DB::rollBack();
-         $message = $e->getMessage();
+            return $this->respondSuccess($purchase);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
 
-         return $this->respondWithError($message, [], 500);
-     }
+            return $this->respondWithError($message, [], 500);
+        }
     }
 
     public function createInit($id)
@@ -291,16 +330,18 @@ class OrderController extends Controller
                     'sell_lines',
                     'stock:id,stock_name,stock_type,location_id',
                     'stock.location:id,name,landmark',
-                    'sell_lines.product:id,sku,name,contact_id,unit_id',
+                    'sell_lines.product:id,sku,barcode,name,contact_id,unit_id',
                     'sell_lines.product.contact:id,name',
                     'sell_lines.product.unit:id,actual_name',
+                    'sell_lines.product.stock_products',
                     'sell_lines.variations',
                     'sell_lines.variations.product_variation',
                     'sell_lines.sub_unit',
                     'location:id,name,landmark,mobile',
                     'payment_lines',
-                    'tax',
-                    'sales_person:id,username,first_name,last_name,contact_number,email'
+                    'tax:id,name,amount',
+                    'sales_person:id,username,first_name,last_name,contact_number,email',
+                    'delivery_company:id,name,tracking'
                 )
                 ->select([
                     'transactions.id',
@@ -371,7 +412,8 @@ class OrderController extends Controller
             $status = $request->status;
 
             $dataUpdate = [
-                'status' => "pending"
+                'status' => "pending",
+                "pending_by" => $user_id
             ];
 
             $transaction = DB::table('transactions')
@@ -418,7 +460,8 @@ class OrderController extends Controller
             $status = $request->status;
 
             $dataUpdate = [
-                'status' => "approve"
+                'status' => "approve",
+                "approve_by" => $user_id
             ];
 
             $transaction = DB::table('transactions')
@@ -465,7 +508,8 @@ class OrderController extends Controller
             $status = $request->status;
 
             $dataUpdate = [
-                'status' => "reject"
+                'status' => "reject",
+                "reject_by" => $user_id
             ];
 
             $transaction = DB::table('transactions')
@@ -482,6 +526,56 @@ class OrderController extends Controller
             $message = "Chuyển trạng thái mua hàng thành " . $status;
 
             Activity::history($message , "purchase_request", $dataLog);
+
+            DB::commit();
+
+            return $this->respondSuccess($transaction);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    public function changeStatus(Request $request)
+    {
+        try {
+            $ids = $request->ids;
+
+            if (!isset($ids) || count($ids) === 0) {
+                $res = [
+                    'status' => 'danger',
+                    'msg' => "Không tìm thấy đơn hàng"
+                ];
+
+                return response()->json($res, 404);
+            }
+
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            $status = $request->status;
+
+            $dataUpdate = [
+                'status' => $status
+            ];
+
+            if ($status === "approve") {
+                $dataUpdate["approve_by"] = $user_id;
+            }
+
+            if ($status === "reject") {
+                $dataUpdate["reject_by"] = $user_id;
+            }
+
+            if ($status === "pending_by") {
+                $dataUpdate["pending_by"] = $user_id;
+            }
+
+            $transaction = DB::table('transactions')
+                ->whereIn('id', $ids)
+                ->update($dataUpdate);
 
             DB::commit();
 
@@ -527,6 +621,21 @@ class OrderController extends Controller
             $update_data["updated_by"] = $user_id;
 
             $update_data["transaction_date"] = Carbon::createFromFormat('d/m/Y', $update_data["transaction_date"]);
+
+            if (!empty($request->status)) {
+                $update_data['status'] = $request->status;
+                if ($request->status === "approve") {
+                    $update_data['approve_by'] = $user_id;
+                }
+
+                if ($request->status === "pending") {
+                    $update_data['pending_by'] = $user_id;
+                }
+
+                if ($request->status === "reject") {
+                    $update_data['reject_by'] = $user_id;
+                }
+            }
 
             //update transaction
             $transaction->update($update_data);

@@ -22,71 +22,31 @@ class Category extends Model
      * @var array
      */
     protected $guarded = ['id'];
+    protected $appends = ['image_url'];
 
-    /**
-     * Combines Category and sub-category
-     *
-     * @param int $business_id
-     * @return array
-     */
-    public static function catAndSubCategories($business_id)
+
+    public function getImageUrlAttribute()
     {
-        $all_categories = Category::where('business_id', $business_id)
-                        ->orderBy('name', 'asc')
-                        ->get()
-                        ->toArray();
-                        
-        if (empty($all_categories)) {
-            return [];
+        if (!empty($this->image)) {
+            $image_url = asset($this->image);
+        } else {
+            $image_url = asset('/img/default.png');
         }
-        $categories = [];
-        $sub_categories = [];
-
-        foreach ($all_categories as $category) {
-            if ($category['parent_id'] == 0) {
-                $categories[] = $category;
-            } else {
-                $sub_categories[] = $category;
-            }
-        }
-
-        $sub_cat_by_parent = [];
-        if (!empty($sub_categories)) {
-            foreach ($sub_categories as $sub_category) {
-                if (empty($sub_cat_by_parent[$sub_category['parent_id']])) {
-                    $sub_cat_by_parent[$sub_category['parent_id']] = [];
-                }
-
-                $sub_cat_by_parent[$sub_category['parent_id']][] = $sub_category;
-            }
-        }
-
-        foreach ($categories as $key => $value) {
-            if (!empty($sub_cat_by_parent[$value['id']])) {
-                $categories[$key]['sub_categories'] = $sub_cat_by_parent[$value['id']];
-            }
-        }
-
-        return $categories;
+        return $image_url;
     }
 
-    /**
-     * Category Dropdown
-     *
-     * @param int $business_id
-     * @param string $type category type
-     * @return array
-     */
-    public static function forDropdown($business_id, $type)
+    public function business()
     {
-        $categories = Category::where('business_id', $business_id)
-                            ->where('parent_id', 0)
-                            ->where('category_type', $type)
-                            ->select(DB::raw('IF(short_code IS NOT NULL, CONCAT(name, "-", short_code), name) as name'), 'id')
-                            ->get();
+        return $this->belongsTo(\App\Business::class, 'business_id');
+    }
 
-        $dropdown =  $categories->pluck('name', 'id');
+    public function created_by()
+    {
+        return $this->belongsTo(\App\User::class, 'created_by');
+    }
 
-        return $dropdown;
+    public function parent()
+    {
+        return $this->belongsTo(Category::class, 'parent_id');
     }
 }

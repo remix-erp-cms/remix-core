@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Options;
 
 use App\Http\Controllers\Controller;
+use App\Menu;
 use App\Option;
 
 use Illuminate\Support\Facades\Auth;
@@ -29,6 +30,10 @@ class AjaxController extends Controller
 
             if (isset($request->type) && $request->type) {
                 $options->where('options.type', $request->type);
+            }
+
+            if (isset($request->sub_type) && $request->sub_type) {
+                $options->where('options.sub_type', $request->sub_type);
             }
 
             if (isset($request->value) && $request->value) {
@@ -62,22 +67,65 @@ class AjaxController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $input = $request->only(['name', 'amount', 'value', 'images', 'auto_load', 'type']);
+            if (isset($request->data) && count($request->data) > 0) {
+                $listData = $request->data;
 
-            $input['business_id'] = $business_id;
-            $input['created_by'] = $user_id;
+                foreach ($listData as $menu) {
+                    $menu = (object)$menu;
 
-            $result = Option::create($input);
+                    $inputData = [
+                        'name' => $menu->name,
+                        'value' => isset($menu->value) ? $menu->value : null,
+                        'amount' => isset($menu->amount) ? $menu->amount : null,
+                        'images' => isset($menu->images) ? $menu->images : null,
+                        'type' => $menu->type,
+                        'sub_type' => isset($menu->sub_type) ? $menu->sub_type : null,
+                        "business_id" => $business_id,
+                        "created_by" => $user_id,
+                    ];
 
-            if (!$result) {
-                $message = "Không thể lưu dữ liệu";
-                return $this->respondWithError($message, [], 503);
+                    $checkMenu = Option::where('name', $menu->name)
+                        ->where("type", $menu->type)
+                        ->first();
+
+                    if ($checkMenu) {
+                        $result = Option::where('name', $menu->name)
+                            ->where("type", $menu->type)
+                            ->update($inputData);
+
+                        if (!$result) {
+                            $message = "Không thể lưu dữ liệu";
+                            return $this->respondWithError($message, [], 503);
+                        }
+                    } else {
+                        $result = Option::create($inputData);
+
+                        if (!$result) {
+                            $message = "Không thể lưu dữ liệu";
+                            return $this->respondWithError($message, [], 503);
+                        }
+                    }
+                }
+
+
+            } else {
+                $input = $request->only(['name', 'amount', 'value', 'images', 'auto_load', 'type', 'sub_type']);
+
+                $input['business_id'] = $business_id;
+                $input['created_by'] = $user_id;
+
+                $result = Option::create($input);
+
+                if (!$result) {
+                    $message = "Không thể lưu dữ liệu";
+                    return $this->respondWithError($message, [], 503);
+                }
             }
 
             DB::commit();
             $message = "Thêm dữ liệu thành công";
 
-            return $this->respondSuccess($result, $message);
+            return $this->respondSuccess($message, $message);
         } catch (\Exception $e) {
             DB::commit();
             $message = $e->getMessage();
@@ -92,7 +140,7 @@ class AjaxController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
 
             $option = Option::where('business_id', $business_id)
-            ->findOrFail($id);
+                ->findOrFail($id);
 
             $message = "Lấy dữ liệu thành công";
 
@@ -109,13 +157,13 @@ class AjaxController extends Controller
         DB::beginTransaction();
 
         try {
-            $input = $request->only(['name', 'amount', 'value', 'images', 'auto_load', 'type']);
+            $input = $request->only(['name', 'amount', 'value', 'images', 'auto_load', 'type', 'sub_type']);
 
             $business_id = Auth::guard('api')->user()->business_id;
 
             $options = Option::where('business_id', $business_id)->findOrFail($id);
 
-            if(isset($input['name'])) {
+            if (isset($input['name'])) {
                 $options->name = $input['name'];
             }
             if (isset($input['amount'])) {
@@ -132,6 +180,10 @@ class AjaxController extends Controller
             }
             if (isset($input['type'])) {
                 $options->type = $input['type'];
+            }
+
+            if (isset($input['sub_type'])) {
+                $options->type = $input['sub_type'];
             }
 
             $result = $options->save();

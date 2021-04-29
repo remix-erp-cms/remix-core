@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Yajra\DataTables\Facades\DataTables;
 
-class WarrantyController extends Controller
+class WarrantyHistoryController extends Controller
 {
     /**
      * All Utils instance.
@@ -41,11 +41,15 @@ class WarrantyController extends Controller
         try {
             $business_id = Auth::guard('api')->user()->business_id;
 
-            $warranties = Warranty::where('business_id', $business_id)
+            $warranties = ProductSerial::where('is_sell', 1)
+                ->with(
+                    "product:id,name,image,barcode,sku,enable_sr_no",
+                    "transaction:id,final_total,tax_amount,discount_amount,contact_id"
+                )
                 ->select();
 
-            if (isset($request->keyword) && $request->keyword) {
-                $warranties->where("name", "LIKE", "%$request->keyword%");
+            if (isset($request->serial) && $request->serial) {
+                $warranties->where("serial", "LIKE", "%$request->serial%");
             }
 
             $data = $warranties->paginate($request->limit);

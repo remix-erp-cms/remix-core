@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Yajra\DataTables\Facades\DataTables;
 use Illuminate\Http\Request;
+use Excel;
 
 use App\Utils\Util;
 
@@ -217,4 +218,104 @@ class UnitController extends Controller
             return $this->respondWithError($message, [], 500);
         }
     }
+
+    public function importData(Request $request)
+    {
+        DB::beginTransaction();
+
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            //Set maximum php execution time
+            ini_set('max_execution_time', 0);
+            ini_set('memory_limit', -1);
+
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+
+                $parsed_array = Excel::toArray([], $file);
+
+                //Remove header row
+                $imported_data = array_splice($parsed_array[0], 1);
+
+                $formated_data = [];
+                $prices_data = [];
+
+                $is_valid = true;
+                $error_msg = '';
+
+                $total_rows = count($imported_data);
+
+                foreach ($imported_data as $key => $value) {
+                    //Check if any column is missing
+                    if (count($value) < 2 ) {
+                        $is_valid =  false;
+                        $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
+                        break;
+                    }
+
+                    $row_no = $key + 1;
+                    $unit_array = [];
+                    $unit_array['business_id'] = $business_id;
+                    $unit_array['created_by'] = $user_id;
+
+             
+                    //Add SKU
+                    $actual_name = trim($value[0]);
+                    if (!empty($actual_name)) {
+                        $unit_array['actual_name'] = $actual_name;
+                        //Check if product with same SKU already exist
+                        $is_exist = Unit::where('actual_name', $unit_array['actual_name'])
+                            ->where('business_id', $business_id)
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "Tên đơn vị : $actual_name đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu tên đơn vị";
+                        break;
+                    }
+
+                    //Add product name
+                    $short_name = trim($value[1]);
+                    if (!empty($short_name)) {
+                        $unit_array['short_name'] = $short_name;
+                    } else {
+                        $is_valid =  false;
+                        $error_msg = "Không tìm thấy tên viết tắt. $row_no";
+                        break;
+                    }
+
+                    $formated_data[] = $unit_array;
+                }
+
+                if (!$is_valid) {
+                    throw new \Exception($error_msg);
+                }
+
+                if (!empty($formated_data)) {
+                    foreach ($formated_data as $index => $unit_data) {
+                        //Create new product
+                        Unit::create($unit_data);
+                    }
+                }
+            }
+
+            DB::commit();
+            $message = "Nhập liệu đơn vị thành công";
+
+            return $this->respondSuccess($message, $message);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+
 }

@@ -77,6 +77,25 @@ class Transaction extends Model
         return $this->belongsTo(\App\User::class, 'created_by');
     }
 
+    public function pending_by()
+    {
+        return $this->belongsTo(\App\User::class, 'pending_by');
+    }
+
+    public function approve_by()
+    {
+        return $this->belongsTo(\App\User::class, 'approve_by');
+    }
+
+    public function reject_by()
+    {
+        return $this->belongsTo(\App\User::class, 'reject_by');
+    }
+
+    public function complete_by()
+    {
+        return $this->belongsTo(\App\User::class, 'complete_by');
+    }
     public function delivery_company()
     {
         return $this->belongsTo(\App\DeliveryCompany::class, 'delivery_company_id');
@@ -97,14 +116,19 @@ class Transaction extends Model
         return $this->belongsTo(\App\User::class, 'res_waiter_id');
     }
 
-    public function recurring_invoices()
+    public function invoices()
     {
         return $this->hasMany(\App\Transaction::class, 'recur_parent_id');
     }
 
-    public function recurring_parent()
+    public function parent()
     {
         return $this->hasOne(\App\Transaction::class, 'id', 'recur_parent_id');
+    }
+
+    public function children()
+    {
+        return $this->hasMany(\App\Transaction::class, 'recur_parent_id', 'id');
     }
 
     public function price_group()

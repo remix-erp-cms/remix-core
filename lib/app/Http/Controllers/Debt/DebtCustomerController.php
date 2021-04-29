@@ -157,7 +157,6 @@ class DebtCustomerController extends Controller
 
             $purchase->addSelect('transactions.res_order_status');
 
-
             $purchase->groupBy('transactions.contact_id', 'transactions.payment_status');
             $purchase->orderBy('transactions.created_at', "desc");
             $purchase->select(DB::raw('sum(final_total) as final_total, contact_id, payment_status'));
@@ -241,12 +240,16 @@ class DebtCustomerController extends Controller
             $start = null;
             $end = null;
 
-            if (!empty(request()->start_date) && !empty(request()->end_date)) {
+            if (!empty(request()->start_date)) {
                 $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+
+                $purchase->whereDate('transactions.transaction_date', '>=', $start);
+            }
+
+            if (!empty(request()->end_date)) {
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
 
-                $purchase->whereDate('transactions.transaction_date', '>=', $start)
-                    ->whereDate('transactions.transaction_date', '<=', $end);
+                $purchase->whereDate('transactions.transaction_date', '<=', $end);
             }
 
             $status = request()->status;
@@ -323,6 +326,118 @@ class DebtCustomerController extends Controller
         }
     }
 
+    public function listProduct(Request $request)
+    {
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $location_id = $request->location_id;
+            $stock_id = $request->stock_id;
+            $stock_id = $request->stock_id;
+
+            $purchase = TransactionSellLine::leftJoin('transactions', 'transactions.id', '=', 'transaction_sell_lines.transaction_id')
+                ->leftJoin('contacts', 'contacts.id', '=', 'transactions.contact_id')
+                ->leftJoin('products', 'products.id', '=', 'transaction_sell_lines.product_id')
+                ->leftJoin('units', 'products.unit_id', '=', 'units.id')
+                ->where('transactions.status', 'approve')
+                ->select(
+                    'transaction_sell_lines.*',
+                    'transactions.stock_id',
+                    'transactions.status',
+                    'transactions.res_order_status',
+                    'transactions.transaction_date as transaction_date',
+                    'transactions.staff_note as staff_note',
+                    'contacts.name as contact_name',
+                    'contacts.tax_number as tax_number',
+                    'products.name as product_name',
+                    'units.actual_name as unit_name',
+                    \DB::raw('SUM(transaction_sell_lines.unit_price * transaction_sell_lines.quantity_sold) as final_total')
+                );
+
+            if (request()->has('id')) {
+                $id = request()->get('id');
+                if (!empty($id)) {
+                    $purchase->where('transactions.id', $id);
+                }
+            }
+
+            //Add condition for created_by,used in sales representative sales report
+            if (request()->has('created_by')) {
+                $created_by = request()->get('created_by');
+                if (!empty($created_by)) {
+                    $purchase->where('transactions.created_by', $created_by);
+                }
+            }
+
+            $contact_id = request()->get('contact_id');
+            if (!empty($contact_id)) {
+                $purchase->where('transactions.contact_id', $contact_id);
+            }
+
+            $start = null;
+            $end = null;
+
+            if (!empty(request()->start_date)) {
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+
+                $purchase->whereDate('transactions.transaction_date', '>=', $start);
+            }
+
+            if (!empty(request()->end_date)) {
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+
+                $purchase->whereDate('transactions.transaction_date', '<=', $end);
+            }
+
+            $status = request()->status;
+
+            if (!empty($status) && $status != "all") {
+                $purchase->where('transactions.status', $status);
+            }
+
+            $payment_status = request()->payment_status;
+
+            if (!empty($payment_status) && $payment_status != "all") {
+                $purchase->where('transactions.payment_status', $payment_status);
+            }
+
+            $shipping_status = request()->shipping_status;
+
+            if (!empty($shipping_status) && $shipping_status != "all") {
+                $purchase->where('transactions.shipping_status', $shipping_status);
+            }
+
+            $receipt_status = request()->receipt_status;
+
+            if (!empty($receipt_status) && $receipt_status != "all") {
+                $purchase->where('transactions.receipt_status', $receipt_status);
+            }
+
+            if (empty($receipt_status)) {
+                $purchase->where('transactions.receipt_status', "approve");
+            }
+
+            $res_order_status = request()->res_order_status;
+
+            if (!empty($res_order_status) && count($res_order_status) > 0) {
+                $purchase->whereIn('transactions.res_order_status', $res_order_status);
+            } else if (!empty($res_order_status) && $res_order_status != "all") {
+                $purchase->where('transactions.res_order_status', $res_order_status);
+            }
+
+            $purchase->groupBy('transaction_sell_lines.id');
+            $purchase->orderBy('transaction_sell_lines.created_at', "desc");
+
+            $data = $purchase->paginate($request->limit);
+
+            return $this->respondSuccess($data, null);
+        } catch (\Exception $e) {
+//            dd($e);
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
     public function createInit(Request $request)
     {
         DB::beginTransaction();
@@ -388,37 +503,35 @@ class DebtCustomerController extends Controller
 
             $input = $request->only([
                 'contact_id',
-                'stock_id',
-                'location_id',
-                'transaction_id',
-                'total_before_tax',
-                'fee',
-                'tax',
-                'final_total',
-                'credit',
-                'debit',
-                'type',
-                'note',
-                'accountant_date'
+                'total_pay',
+                'payment_method'
             ]);
-
 
             $request->validate([
                 'contact_id' => 'required',
-                'location_id' => 'required',
-                'final_total' => 'required',
-                'credit' => 'required',
-                'debit' => 'required',
-                'type' => 'required',
                 'payment_method' => 'required',
+                'ids' => 'required',
+                'final_total'=> 'required'
             ]);
 
-            $input['business_id'] = $business_id;
-            $input['created_by'] = $user_id;
-            $input['status'] = "create";
-            $input["accountant_date"] = Carbon::createFromFormat('d/m/Y', $input["accountant_date"]);
+            $contactId = $request->contact_id;
+            $transactionIds = $request->ids;
 
-            $result = Accountant::create($input);
+            if (count($transactionIds) == 0) {
+                DB::rollBack();
+                $message = "Không tìm thấy đơn hàng nào cần được thanh toán";
+                return $this->respondWithError($message, [], 500);
+            }
+
+            $result = Transaction::where('contact_id', $contactId)
+                ->with([
+                    'contact:id,name,mobile,email,tax_number,type',
+                ])
+                ->where('receipt_status', "approve")
+                ->whereIn('id', $transactionIds)
+                ->whereIn('payment_status', ['payment_pending'])
+                ->get();
+
 
             if (!$result) {
                 DB::rollBack();
@@ -426,58 +539,47 @@ class DebtCustomerController extends Controller
                 return $this->respondWithError($message, [], 500);
             }
 
-            $ref_count = $this->productUtil->setAndGetReferenceCount("sell_payment", $business_id);
+            foreach ($result as $transaction) {
+                $input = [
+                    'accountant_date' => now(),
+                    'contact_id' => $contactId,
+                    'credit' => $transaction->final_total,
+                    'debit' => 0,
+                    'fee' => 0,
+                    'final_total' => $transaction->final_total,
+                    'location_id' => $request->location_id,
+                    'stock_id' => $request->stock_id,
+                    'tax' => $transaction->tax_amount,
+                    'total_before_tax' => $transaction->total_before_tax,
+                    'transaction_id' => $transaction->id,
+                    'note' => "Thanh toán toàn bộ công nợ cho khách hàng " . $transaction->contact->name,
+                    'payment_method' => $request->payment_method,
+                    'type' => "receive",
+                ];
 
-            $dataPay = [
-                "accountant_id" => $result->id,
-                "created_by" => $user_id,
-                "location_id" => $request->location_id,
-                "contact_id" => $request->contact_id,
-                "business_id" => $business_id,
-                "transaction_id" => $request->transaction_id,
-                "note" => $request->note,
-                "method" => $request->payment_method,
-                "status" => "received",
-                "type" => "credit",
-                "amount" => $request->credit,
-                "ref_no" => "CT" . $ref_count,
-                "created_at" => now(),
-            ];
 
-            $result_pay_bill = PayBill::create($dataPay);
+                $resultPay = $this->payDebtTransaction($input, $business_id, $user_id);
 
-            if(!$result_pay_bill) {
-                DB::rollBack();
-                $message = "Xảy ra lỗi trong quá trình thanh toán ghi nợ";
-                return $this->respondWithError($message, [], 500);
-            }
+                if ($resultPay->status === false) {
+                    DB::rollBack();
+                    $message = $resultPay->msg ?? "Xảy ra lỗi trong quá trình tạo chứng từ";
+                    return $this->respondWithError($message, [], 500);
+                }
+            };
 
-            // update payment
-            $dataTransaction = [
-                'payment_status' => "payment_paid"
-            ];
-
-            $result_pay_bill = Transaction::where('id', $result->transaction_id)
-            ->update($dataTransaction);
-
-            if(!$result_pay_bill) {
-                DB::rollBack();
-                $message = "Xảy ra lỗi trong quá trình thanh toán ghi nợ";
-                return $this->respondWithError($message, [], 500);
-            }
+            DB::commit();
 
             $dataLog = [
                 'created_by' => $user_id,
                 'business_id' => $business_id,
                 'log_name' => "Thanh toán công nợ",
-                'subject_id' => $result->id
+                'subject_id' => $contactId
             ];
 
-            $message = "Thanh toán cho đơn hàng trị giá là" . $request->credit . "đ";
-            Activity::history($message , "purchase_request", $dataLog);
 
+            $message = "Thanh toán cho khách hàng có ID " . $contactId . "đ";
+            Activity::history($message, "accountant_customer", $dataLog);
 
-            DB::commit();
 
             return $this->respondSuccess($result);
         } catch (\Exception $e) {
@@ -485,6 +587,170 @@ class DebtCustomerController extends Controller
             $message = $e->getMessage();
 
             return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    public function paymentAll(Request $request)
+    {
+        DB::beginTransaction();
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            $input = $request->only([
+                'contact_id',
+                'total_pay',
+                'payment_method'
+            ]);
+
+            $request->validate([
+                'contact_id' => 'required',
+                'payment_method' => 'required',
+            ]);
+
+            $contactId = $request->contact_id;
+
+            $result = Transaction::where('contact_id', $contactId)
+                ->with([
+                    'contact:id,name,mobile,email,tax_number,type',
+                ])
+                ->where('receipt_status', "approve")
+                ->whereIn('payment_status', ['payment_pending'])
+                ->get();
+
+            if (!$result) {
+                DB::rollBack();
+                $message = "Xảy ra lỗi trong quá trình tạo chứng từ";
+                return $this->respondWithError($message, [], 500);
+            }
+
+            foreach ($result as $transaction) {
+                $input = [
+                    'accountant_date' => now(),
+                    'contact_id' => $contactId,
+                    'credit' => $transaction->final_total,
+                    'debit' => 0,
+                    'fee' => 0,
+                    'final_total' => $transaction->final_total,
+                    'location_id' => $request->location_id,
+                    'stock_id' => $request->stock_id,
+                    'tax' => $transaction->tax_amount,
+                    'total_before_tax' => $transaction->total_before_tax,
+                    'transaction_id' => $transaction->id,
+                    'note' => "Thanh toán toàn bộ công nợ cho khách hàng " . $transaction->contact->name,
+                    'payment_method' => $request->payment_method,
+                    'type' => "receive",
+                ];
+
+
+                $resultPay = $this->payDebtTransaction($input, $business_id, $user_id);
+
+                if ($resultPay->status === false) {
+                    DB::rollBack();
+                    $message = $resultPay->msg ?? "Xảy ra lỗi trong quá trình tạo chứng từ";
+                    return $this->respondWithError($message, [], 500);
+                }
+            };
+
+            DB::commit();
+
+            $dataLog = [
+                'created_by' => $user_id,
+                'business_id' => $business_id,
+                'log_name' => "Thanh toán công nợ",
+                'subject_id' => $contactId
+            ];
+
+
+            $message = "Thanh toán cho khách hàng có ID " . $contactId . "đ";
+            Activity::history($message, "accountant_customer", $dataLog);
+
+
+            return $this->respondSuccess($result);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    private function payDebtTransaction($input, $business_id, $user_id)
+    {
+        try {
+            $input['business_id'] = $business_id;
+            $input['created_by'] = $user_id;
+            $input['status'] = "create";
+            $input["accountant_date"] = now();
+
+            $result = Accountant::create($input);
+
+            if (!$result) {
+                return (object)[
+                    'status' => false,
+                    'msg' => 'Không thể lưu chứng từ'
+                ];
+            }
+
+            $ref_count = $this->productUtil->setAndGetReferenceCount("sell_payment", $business_id);
+
+            $location_id = $input["location_id"];
+            $contact_id = $input["contact_id"];
+            $transaction_id = $input["transaction_id"];
+            $note = $input["note"];
+            $payment_method = $input["payment_method"];
+            $credit = $input["credit"];
+
+            $dataPay = [
+                "accountant_id" => $result->id,
+                "created_by" => $user_id,
+                "location_id" => $location_id,
+                "contact_id" => $contact_id,
+                "business_id" => $business_id,
+                "transaction_id" => $transaction_id,
+                "note" => $note,
+                "method" => $payment_method,
+                "status" => "received",
+                "type" => "credit",
+                "amount" => $credit,
+                "ref_no" => "CT" . $ref_count,
+                "created_at" => now(),
+            ];
+
+            $result_pay_bill = PayBill::create($dataPay);
+
+            if (!$result_pay_bill) {
+                return (object)[
+                    'status' => false,
+                    'msg' => "Không thể lưu phiếu thu"
+                ];
+            }
+
+            // update payment
+            $dataTransaction = [
+                'payment_status' => "payment_paid",
+                'payment_method' => $payment_method
+            ];
+
+            $result_pay_bill = Transaction::where('id', $transaction_id)
+                ->update($dataTransaction);
+
+            if (!$result_pay_bill) {
+                return (object)[
+                    'status' => false,
+                    'msg' => 'Lỗi cập nhật trạng thái thanh toán'
+                ];
+            }
+
+            return (object)[
+                'status' => true,
+                'msg' => $result
+            ];
+        } catch (\Exception $e) {
+            return (object)[
+                'status' => false,
+                'msg' => $e->getMessage()
+            ];
         }
     }
 

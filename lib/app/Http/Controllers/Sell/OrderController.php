@@ -34,6 +34,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Yajra\DataTables\Facades\DataTables;
+use Excel;
 
 class OrderController extends Controller
 {
@@ -81,7 +82,7 @@ class OrderController extends Controller
             $location_id = $request->location_id;
             $stock_id = $request->stock_id;
 
-            $purchase = Transaction::with([
+            $saleOrder = Transaction::with([
                 'contact:id,name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
@@ -96,7 +97,7 @@ class OrderController extends Controller
             if (request()->has('id')) {
                 $id = request()->get('id');
                 if (!empty($id)) {
-                    $purchase->where('transactions.id', $id);
+                    $saleOrder->where('transactions.id', $id);
                 }
             }
 
@@ -104,14 +105,14 @@ class OrderController extends Controller
             if (request()->has('created_by')) {
                 $created_by = request()->get('created_by');
                 if (!empty($created_by)) {
-                    $purchase->where('transactions.created_by', $created_by);
+                    $saleOrder->where('transactions.created_by', $created_by);
                 }
             }
 
 
             $contact_id = request()->get('contact_id');
             if (!empty($contact_id)) {
-                $purchase->where('transactions.contact_id', $contact_id);
+                $saleOrder->where('transactions.contact_id', $contact_id);
             }
 
             $start = Carbon::now()->startOfMonth();
@@ -126,36 +127,42 @@ class OrderController extends Controller
             }
 
 
-            $purchase->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end);
+            $saleOrder->whereDate('transactions.created_at', '>=', $start)
+                ->whereDate('transactions.created_at', '<=', $end);
 
             $status = request()->status;
 
             if (!empty($status) && $status != "all") {
-                $purchase->where('transactions.status', $status);
+                $saleOrder->where('transactions.status', $status);
             }
 
             $shipping_status = request()->shipping_status;
 
             if (!empty($shipping_status) && $shipping_status != "all") {
-                $purchase->where('transactions.shipping_status', $shipping_status);
+                $saleOrder->where('transactions.shipping_status', $shipping_status);
             }
 
             $res_order_status = request()->res_order_status;
 
             if (!empty($res_order_status) && count($res_order_status) > 0) {
-                $purchase->whereIn('transactions.res_order_status', $res_order_status);
+                $saleOrder->whereIn('transactions.res_order_status', $res_order_status);
             } else if (!empty($res_order_status) && $res_order_status != "all") {
-                $purchase->where('transactions.res_order_status', $res_order_status);
+                $saleOrder->where('transactions.res_order_status', $res_order_status);
             }
 
-            $purchase->addSelect('transactions.res_order_status');
+            $receipt_status = request()->receipt_status;
 
-            $purchase->groupBy('transactions.id');
-            $purchase->orderBy('transactions.created_at', "desc");
-            $purchase->select();
+            if (!empty($receipt_status) && $receipt_status != "all") {
+                $saleOrder->where('transactions.receipt_status', $receipt_status);
+            }
 
-            $data = $purchase->paginate($request->limit);
+            $saleOrder->addSelect('transactions.res_order_status');
+
+            $saleOrder->groupBy('transactions.id');
+            $saleOrder->orderBy('transactions.created_at', "desc");
+            $saleOrder->select();
+
+            $data = $saleOrder->paginate($request->limit);
 
             $summary = DB::table('transactions')
                 ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
@@ -187,53 +194,67 @@ class OrderController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $purchase = Transaction::where('business_id', $business_id)
+            $saleOrder = Transaction::where('business_id', $business_id)
                 ->where('id', $id)
                 ->with(
-                    'contact',
-                    'purchase_lines',
-                    'purchase_lines.product:id,sku,name,contact_id,unit_id',
-                    'purchase_lines.product.contact:id,name',
-                    'purchase_lines.product.unit:id,actual_name',
-                    'purchase_lines.variations',
-                    'purchase_lines.variations.product_variation',
-                    'purchase_lines.sub_unit',
+                    'contact:id,contact_id,first_name,name,mobile,email,type,address_line_1,created_at',
+                    'sell_lines',
+                    'stock:id,stock_name,stock_type,location_id',
+                    'stock.location:id,name,landmark',
+                    'sell_lines.product:id,sku,barcode,name,contact_id,unit_id',
+                    'sell_lines.product.contact:id,name',
+                    'sell_lines.product.unit:id,actual_name',
+                    'sell_lines.product.stock_products',
+                    'sell_lines.variations',
+                    'sell_lines.variations.product_variation',
+                    'sell_lines.sub_unit',
                     'location:id,name,landmark,mobile',
                     'payment_lines',
-                    'tax'
+                    'tax:id,name,amount',
+                    'sales_person:id,username,first_name,last_name,contact_number,email',
+                    'delivery_company:id,name,tracking'
                 )
                 ->select([
                     'transactions.id',
                     'transactions.type',
+                    'transactions.sub_type',
                     'transactions.ref_no',
                     'transactions.transaction_date',
                     'transactions.invoice_no',
-                    DB::raw('"ordered" as status'),
+                    'transactions.status',
+                    'transactions.shipping_status',
+                    'transactions.res_order_status',
+                    'transactions.receipt_status',
+                    'transactions.payment_status',
                     'transactions.stock_id',
+                    'transactions.contact_id',
                     'transactions.location_id',
                     'transactions.business_id',
+                    'transactions.created_by',
                     'transactions.reject_by',
                     'transactions.updated_by',
                     'transactions.complete_by',
                     'transactions.approve_by',
                     'transactions.created_at',
+                    'transactions.total_before_tax',
                     'transactions.final_total',
                     'transactions.tax_amount',
                     'transactions.tax_id',
                     'transactions.staff_note',
                     'transactions.discount_amount',
-                    'transactions.discount_type'
+                    'transactions.discount_type',
+                    'transactions.payment_method',
+                    'transactions.service_custom_field_1',
+                    'transactions.service_custom_field_2',
+                    'transactions.service_custom_field_3',
+                    'transactions.delivery_company_id',
+                    'transactions.shipping_address',
+                    'transactions.shipping_type',
+                    'transactions.shipping_charges',
                 ])
                 ->firstOrFail();
 
-            foreach ($purchase->purchase_lines as $key => $value) {
-                if (!empty($value->sub_unit_id)) {
-                    $formated_purchase_line = $this->productUtil->changePurchaseLineUnit($value, $business_id);
-                    $purchase->purchase_lines[$key] = $formated_purchase_line;
-                }
-            }
-
-            return $this->respondSuccess($purchase);
+            return $this->respondSuccess($saleOrder);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -311,13 +332,22 @@ class OrderController extends Controller
             if (!empty($request->status)) {
                 $transaction_data['status'] = $request->status;
 
-
                 if ($request->status === "approve") {
+                    $transaction_data['approve_by'] = $user_id;
                     if ($isDirect === true) {
-                        $transaction_data['shipping_status'] = "request";
+                        $transaction_data['shipping_status'] = "created";
+                        $transaction_data['payment_status'] = "payment_paid";
                     } else {
-                        $transaction_data['res_order_status'] = "created";
+                        $transaction_data['res_order_status'] = "request";
                     }
+                }
+
+                if ($request->status === "pending") {
+                    $transaction_data['pending_by'] = $user_id;
+                }
+
+                if ($request->status === "reject") {
+                    $transaction_data['reject_by'] = $user_id;
                 }
 
             }
@@ -329,7 +359,7 @@ class OrderController extends Controller
 
             //Generate reference number
             if (empty($transaction_data['invoice_no'])) {
-                $transaction_data['invoice_no'] = $this->productUtil->generateReferenceNumber($transaction_data['type'], $ref_count);
+                $transaction_data['invoice_no'] = $this->productUtil->generateReferenceNumber($transaction_data['type'], $ref_count, $business_id, "SO");
             }
 
             $discount = null;
@@ -384,7 +414,7 @@ class OrderController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $purchase = Transaction::where('business_id', $business_id)
+            $saleOrder = Transaction::where('business_id', $business_id)
                 ->where('id', $id)
                 ->with(
                     'contact:id,contact_id,first_name,name,mobile,email,type,address_line_1,created_at',
@@ -433,8 +463,10 @@ class OrderController extends Controller
                     'transactions.staff_note',
                     'transactions.discount_amount',
                     'transactions.discount_type',
+                    'transactions.payment_method',
                     'transactions.service_custom_field_1',
                     'transactions.service_custom_field_2',
+                    'transactions.service_custom_field_3',
                     'transactions.delivery_company_id',
                     'transactions.shipping_address',
                     'transactions.shipping_type',
@@ -442,7 +474,7 @@ class OrderController extends Controller
                 ])
                 ->firstOrFail();
 
-            return $this->respondSuccess($purchase);
+            return $this->respondSuccess($saleOrder);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -451,10 +483,12 @@ class OrderController extends Controller
         }
     }
 
-    public function change_status(Request $request, $id)
+    public function changeStatus(Request $request)
     {
         try {
-            if (!isset($id) || !$id) {
+            $ids = $request->ids;
+
+            if (!isset($ids) || count($ids) === 0) {
                 $res = [
                     'status' => 'danger',
                     'msg' => "Không tìm thấy đơn hàng"
@@ -465,29 +499,81 @@ class OrderController extends Controller
 
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
+            $stock_id = $request->stock_id;
 
             $status = $request->status;
+            $receipt_status = $request->receipt_status;
 
-            $dataUpdate = [
-                'status' => $status
-            ];
+            $transaction = [];
 
-            $transaction = DB::table('transactions')
-                ->where('id', $id)
-                ->update($dataUpdate);
+            if (!empty($status)) {
+                if ($status === "approve") {
+                    foreach ($ids as $id) {
+                        $transaction = Transaction::findOrFail($id);
 
-            $dataLog = [
-                'created_by' => $user_id,
-                'business_id' => $business_id,
-                'log_name' => "Cập nhật trạng thái cầu mua hàng",
-                'subject_id' => $transaction->id
-            ];
+                        if (isset($transaction->ref_no) && is_numeric($transaction->ref_no)) {
+                            $order = Transaction::findOrFail($transaction->ref_no);
+                            if ($order && $order->id) {
+                                $order->status = "complete";
+                                $order->complete_by = $user_id;
+                                $order->save();
+                            }
+                        }
 
-            $message = "Chuyển trạng thái mua hàng thành " . $status;
+                        $transaction->approve_by = $user_id;
+                        $transaction->status = "approve";
+                        $transaction->res_order_status = "request";
+                        $transaction->save();
+                    }
+                } else {
+                    $dataUpdate = [
+                        'status' => $status,
+                    ];
 
-            Activity::history($message, "purchase_request", $dataLog);
+                    if ($status === "pending") {
+                        $dataUpdate["pending_by"] = $user_id;
+                    }
+
+                    if ($status === "reject") {
+                        $dataUpdate["reject_by"] = $user_id;
+                    }
+
+                    $transaction = DB::table('transactions')
+                        ->whereIn('id', $ids)
+                        ->update($dataUpdate);
+                }
+            }
+
+            if (!empty($receipt_status)) {
+                if ($receipt_status === "approve") {
+                    foreach ($ids as $id) {
+                        $transaction = Transaction::findOrFail($id);
+
+                        $transaction->receipt_status = "approve";
+                        $transaction->shipping_status = "created";
+
+                        $result = $this->changeQuantityProduct($transaction->id, $stock_id, $user_id, $business_id);
+
+                        if (!$result) {
+                            DB::rollBack();
+                            $message = "Lỗi khi thêm sản phẩm vào kho";
+
+                            return $this->respondWithError($message, [], 500);
+                        }
+                        $transaction->save();
+                    }
+                } else {
+                    $dataUpdate = [
+                        'receipt_status' => $receipt_status
+                    ];
+                    $transaction = DB::table('transactions')
+                        ->whereIn('id', $ids)
+                        ->update($dataUpdate);
+                }
+            }
 
             DB::commit();
+
 
             return $this->respondSuccess($transaction);
         } catch (\Exception $e) {
@@ -519,11 +605,13 @@ class OrderController extends Controller
                 $order = Transaction::findOrFail($transaction->ref_no);
                 if ($order && $order->id) {
                     $order->status = "po_pending";
+                    $order->pending_by = "po_pending";
                     $order->save();
                 }
             }
 
             $transaction->status = "pending";
+            $transaction->pending_by = $user_id;
             $transaction->save();
 
             $dataLog = [
@@ -569,12 +657,14 @@ class OrderController extends Controller
                 $order = Transaction::findOrFail($transaction->ref_no);
                 if ($order && $order->id) {
                     $order->status = "complete";
+                    $order->complete_by = $user_id;
                     $order->save();
                 }
             }
 
             $transaction->status = "approve";
             $transaction->res_order_status = "request";
+            $transaction->approve_by = $user_id;
 
             $transaction->save();
 
@@ -621,11 +711,13 @@ class OrderController extends Controller
                 $order = Transaction::findOrFail($transaction->ref_no);
                 if ($order && $order->id) {
                     $order->status = "po_reject";
+                    $order->reject_by = $user_id;
                     $order->save();
                 }
             }
 
             $transaction->status = "reject";
+            $transaction->reject_by = $user_id;
             $transaction->save();
 
             $dataLog = [
@@ -678,6 +770,7 @@ class OrderController extends Controller
 
             $transaction->receipt_status = "approve";
             $transaction->shipping_status = "created";
+            $transaction->complete_by = $user_id;
 
             $result = $this->changeQuantityProduct($transaction->id, $stock_id, $user_id, $business_id);
 
@@ -727,6 +820,8 @@ class OrderController extends Controller
             $transaction = Transaction::findOrFail($id);
 
             $transaction->receipt_status = "reject";
+            $transaction->complete_by = $user_id;
+
             $transaction->save();
 
             $dataLog = [
@@ -858,10 +953,21 @@ class OrderController extends Controller
 
             if (!empty($request->status)) {
                 $input['status'] = $request->status;
+
                 if ($request->status === "approve") {
+                    $input['approve_by'] = $user_id;
                     $input['res_order_status'] = "request";
                 }
+
+                if ($request->status === "pending") {
+                    $input['pending_by'] = $user_id;
+                }
+
+                if ($request->status === "reject") {
+                    $input['reject_by'] = $user_id;
+                }
             }
+
 
             $transaction = $this->transactionUtil->updateSellTransaction($id, $business_id, $input, $invoice_total, $user_id);
 
@@ -912,8 +1018,8 @@ class OrderController extends Controller
             }
             //Delete sell lines first
             $delete_purchase_line_ids = [];
-            foreach ($delete_purchase_lines as $purchase_line) {
-                $delete_purchase_line_ids[] = $purchase_line->id;
+            foreach ($delete_purchase_lines as $saleOrder_line) {
+                $delete_purchase_line_ids[] = $saleOrder_line->id;
             }
 
             PurchaseLine::where('transaction_id', $transaction->id)
@@ -952,7 +1058,7 @@ class OrderController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $purchase = Transaction::where('business_id', $business_id)
+            $saleOrder = Transaction::where('business_id', $business_id)
                 ->where('id', $id)
                 ->with(
                     'contact',
@@ -965,7 +1071,7 @@ class OrderController extends Controller
                 )
                 ->first();
 
-            return $this->respondSuccess($purchase);
+            return $this->respondSuccess($saleOrder);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -977,10 +1083,10 @@ class OrderController extends Controller
     private function changeQuantityProduct($transaction_id, $stock_id, $user_id, $business_id)
     {
         try {
-            $purchase_line = TransactionSellLine::where('transaction_id', $transaction_id)->get();
+            $saleOrder_line = TransactionSellLine::where('transaction_id', $transaction_id)->get();
 
-            if ($purchase_line && count($purchase_line) > 0) {
-                foreach ($purchase_line as $product) {
+            if ($saleOrder_line && count($saleOrder_line) > 0) {
+                foreach ($saleOrder_line as $product) {
                     $stock = StockProduct::where('stock_id', $stock_id)
                         ->where('product_id', $product->product_id)
                         ->increment('quantity', $product->quantity_sold * -1);
@@ -1007,6 +1113,308 @@ class OrderController extends Controller
             return false;
         } catch (\Exception $e) {
             return false;
+        }
+    }
+
+    public function importData(Request $request)
+    {
+        DB::beginTransaction();
+
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+            $stock_id = $request->stock_id;
+
+            if (!$stock_id) {
+                DB::rollBack();
+                $message = "Vui lòng chọn cửa hàng hoặc kho hàng";
+
+                return $this->respondWithError($message, [], 500);
+            }
+
+            //Set maximum php execution time
+            ini_set('max_execution_time', 0);
+            ini_set('memory_limit', -1);
+
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+
+                $parsed_array = Excel::toArray([], $file);
+
+                //Remove header row
+                $imported_data = array_splice($parsed_array[0], 1);
+
+                $transactionData = [];
+                $sellLineData = [];
+
+                $is_valid = true;
+                $error_msg = '';
+
+                $total_rows = count($imported_data);
+
+                foreach ($imported_data as $key => $value) {
+                    //Check if any column is missing
+                    if (count($value) < 15 ) {
+                        $is_valid =  false;
+                        $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
+                        break;
+                    }
+
+                    $row_no = $key + 1;
+                    $order_array = [];
+                    $sell_lines = [];
+                    $order_array['business_id'] = $business_id;
+                    $order_array['created_by'] = $user_id;
+                    $sell_lines['business_id'] = $business_id;
+                    $sell_lines['created_by'] = $user_id;
+                    $order_array['stock_id'] = $stock_id;
+                    $order_array['status'] = "approve";
+                    $order_array['receipt_status'] = "approve";
+                    $order_array['res_order_status'] = "enough";
+                    $order_array['shipping_status'] = "complete";
+                    $order_array['payment_status'] = "payment_pending";
+                    $order_array['type'] = "sell";
+
+
+                    //Add ref no
+                    $invoice_no = trim($value[0]);
+
+                    if (!empty($invoice_no)) {
+                        $order_array['invoice_no'] = $invoice_no;
+                        //Check if product with same SKU already exist
+                        $is_exist = Transaction::where('invoice_no', $order_array['invoice_no'])
+                            ->where('business_id', $business_id)
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "Mã đơn hàng : $invoice_no đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu mã khách hàng";
+                        break;
+                    }
+
+                    //Add customer
+                    $contact_id = trim($value[4]);
+
+                    if (!empty($contact_id)) {
+                        //Check if product with same SKU already exist
+                        $contact = Contact::where('contact_id', $contact_id)
+                            ->where('business_id', $business_id)
+                            ->first();
+
+                        if (!$contact) {
+                            $is_valid = false;
+                            $error_msg = "Không tìm thấy mã khách hàng : $contact_id ở dòng thứ. $row_no";
+                            break;
+                        }
+
+                        $order_array['contact_id'] = $contact->id;
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu mã khách hàng";
+                        break;
+                    }
+
+                    //Add customer
+                    $location_id = trim($value[5]);
+
+                    if (!empty($location_id)) {
+                        //Check if product with same SKU already exist
+                        $locations = BusinessLocation::where('location_id', $location_id)
+                            ->where('business_id', $business_id)
+                            ->first();
+                        if (!$locations) {
+                            $is_valid = false;
+                            $error_msg = "Không tìm thấy mã cửa hàng : $location_id ở dòng thứ. $row_no";
+                            break;
+                        }
+
+                        $order_array['location_id'] = $locations->id;
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu mã cửa hàng";
+                        break;
+                    }
+
+
+                    //name product
+                    $productSku = trim($value[1]);
+
+                    if (!empty($productSku)) {
+                        //Check if product with same SKU already exist
+                        $product = Product::where('sku', $productSku)
+                            ->where('business_id', $business_id)
+                            ->first();
+                        if (!$product) {
+                            $is_valid = false;
+                            $error_msg = "Không tìm thấy mã sản phẩm : $productSku ở dòng thứ. $row_no";
+                            break;
+                        }
+
+                        $stock_product = StockProduct::where('product_id', $product->id)
+                            ->where('stock_id', $stock_id)
+                            ->first();
+
+                        if (!$stock_product) {
+                            $is_valid = false;
+                            $error_msg = "Không tìm thấy mã sản phẩm : $invoice_no ở dòng thứ. $row_no";
+                            break;
+                        }
+
+                        $sell_lines['product_id'] = $product->id;
+                        $sell_lines['stock_product_id'] = $stock_product->id;
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu mã sản phẩm";
+                        break;
+                    }
+
+                    $quantity = trim($value[7]) ? trim($value[7]) : 0;
+
+                    if (!empty($quantity)) {
+                        $sell_lines['quantity'] = (float)$quantity;
+                        $sell_lines['quantity_sold'] = (float)$quantity;
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu mã số lượng";
+                        break;
+                    }
+
+                    $purchase_price = trim($value[8]) ? trim($value[8]) : 0;
+
+                    if (!empty($purchase_price)) {
+                        $sell_lines['purchase_price'] = (float)$purchase_price;
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu mã giá mua";
+                        break;
+                    }
+
+                    $discount_amount = trim($value[9]) ? trim($value[9]) : 0;
+
+                    if (!empty($discount_amount)) {
+                        $sell_lines['line_discount_amount'] = (float)$discount_amount;
+                    }
+
+                    $totalDiscount = trim($value[10]);
+
+                    if (!empty($discount_amount)) {
+                        $sell_lines['total_discount'] = $totalDiscount;
+                    }
+
+                    $unit_price = trim($value[11]) ?trim($value[11]) : 0;
+                    $sell_lines['unit_price_before_discount']  = 0;
+                    $sell_lines['unit_price_inc_tax']  = 0;
+
+                    if (!empty($unit_price)) {
+                        $sell_lines['unit_price'] = (float)$unit_price;
+                        $sell_lines['unit_price_inc_tax'] = (float)$unit_price + (float)$totalDiscount;
+                        $sell_lines['unit_price_before_discount'] = (float)$unit_price + (float)$totalDiscount;
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu giá bán";
+                        break;
+                    }
+
+                    $total_discount = trim($value[12]);
+
+                    if (!empty($total_discount)) {
+                        $sell_lines['total_discount'] = (float)$total_discount;
+                        $order_array['discount_type'] = "fixed";
+                        $order_array['discount_amount'] = (float)$total_discount;
+                    }
+
+                    $final_total = trim($value[13]);
+
+                    if (!empty($final_total)) {
+                        $sell_lines['total'] = (float)$final_total;
+                        $order_array['final_total'] = (float)$final_total;
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu tổng tiền";
+                        break;
+                    }
+
+                    if ($unit_price && $purchase_price && $quantity) {
+                        $profit = ((float)$unit_price - (float)$purchase_price) * (float) $quantity;
+                        $total_before_tax = (float)$sell_lines['unit_price_before_discount'] * (float) $quantity;
+                        $sell_lines['profit'] = $profit;
+                        $order_array['final_profit'] = (float)$profit;
+                        $order_array['total_before_tax'] = (float)$total_before_tax;
+                    }
+
+                    $transactionData[] = [
+                        'transaction' => $order_array,
+                        'sell_lines' => $sell_lines
+                    ];
+                }
+
+
+
+
+                if (!$is_valid) {
+                    throw new \Exception($error_msg);
+                }
+
+                if (!empty($transactionData)) {
+                    foreach ($transactionData as $index => $order_data) {
+                        //Create new product
+                        $invoice_no = $order_data["transaction"]["invoice_no"];
+
+                        $transaction = Transaction::where('invoice_no', $invoice_no)->first();
+
+                        if (!$transaction) {
+                            $transaction = Transaction::create($order_data["transaction"]);
+                            if (!$transaction) {
+                                DB::rollBack();
+                                $message = "Lỗi trong quá trình nhập liệu";
+
+                                return $this->respondWithError($message, [], 500);
+                            }
+                        } else {
+                            $total_before_tax = $order_data["transaction"]["total_before_tax"];
+                            $final_total = $order_data["transaction"]["final_total"];
+                            $final_profit = $order_data["transaction"]["final_profit"];
+                            $discount_amount = $order_data["transaction"]["discount_amount"];
+
+                            $dataUpdate = [
+                                'total_before_tax' => DB::raw('total_before_tax + ' . $total_before_tax ),
+                                'final_total' => DB::raw('final_total + ' . $final_total ),
+                                'final_profit' => DB::raw('final_profit + ' . $final_profit ),
+                                'discount_amount' => DB::raw('discount_amount + ' . $discount_amount ),
+                            ];
+
+                            $result = Transaction::where('invoice_no', $invoice_no)
+                                ->update($dataUpdate);
+
+                            if (!$result) {
+                                DB::rollBack();
+                                $message = "Lỗi trong quá trình nhập liệu";
+
+                                return $this->respondWithError($message, [], 500);
+                            }
+                        }
+
+                        $order_data["sell_lines"]["transaction_id"] = $transaction->id;
+
+                        TransactionSellLine::create($order_data["sell_lines"]);
+//                        return $this->respondWithError(true, $order_data["transaction"]["ref_no"], 500);
+                    }
+                }
+            }
+
+            DB::commit();
+            $message = "Nhập liệu đơn hàng thành công";
+
+            return $this->respondSuccess($message, $message);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
         }
     }
 

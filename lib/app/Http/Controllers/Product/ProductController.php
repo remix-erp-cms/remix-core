@@ -20,6 +20,8 @@ use App\SellingPriceGroup;
 use App\Stock;
 use App\StockProduct;
 use App\TaxRate;
+use App\Transaction;
+use App\TransactionSellLine;
 use App\Unit;
 use App\Utils\BusinessUtil;
 use App\Utils\ModuleUtil;
@@ -29,12 +31,12 @@ use App\VariationGroupPrice;
 use App\VariationLocationDetails;
 use App\VariationTemplate;
 use App\Warranty;
+use Balping\JsonRaw\Raw;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
-use Yajra\DataTables\Facades\DataTables;
+use Excel;
 
 class ProductController extends Controller
 {
@@ -77,20 +79,61 @@ class ProductController extends Controller
         try {
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
+            $contact_id = $request->contact_id;
+            $showAll = $request->showAll;
 
-            $query = Product::where('products.business_id', $business_id)
-                ->with([
-                    'product_images',
-                    'stock_products',
-                    "brand",
-                    "contact",
-                    "unit",
-                    "category",
-                    "warranty"
-                ])
-                ->where('products.type', '!=', 'modifier');
 
-            $products = $query->select(
+            if ($showAll == "false" && !empty($contact_id)) {
+                $data = $this->getListProductByContact($request, $business_id, $contact_id);
+                return $this->respondSuccess($data);
+            }
+
+            $data = $this->getListAllProduct($request, $business_id);
+            return $this->respondSuccess($data);
+        } catch (\Exception $e) {
+//            dd($e);
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    private function getListProductByContact($request, $business_id, $contact_id)
+    {
+        $latestTransactionLines = TransactionSellLine::leftJoin(
+            'transactions',
+            'transactions.id',
+            '=',
+            'transaction_sell_lines.transaction_id'
+        )
+            ->where('transactions.business_id', $business_id)
+            ->where('transactions.type', 'sell')
+            ->where('transactions.contact_id', $contact_id)
+            ->select(
+                'transaction_sell_lines.product_id',
+                DB::raw('MAX(transaction_sell_lines.id) as id'))
+            ->groupBy('transaction_sell_lines.product_id');
+
+        $products = Product::leftJoinSub($latestTransactionLines, 'tsl2', function ($join) {
+                $join->on('products.id', '=', 'tsl2.product_id');
+            })
+            ->leftJoin(
+                'transaction_sell_lines as tsl',
+                'tsl.id',
+                '=',
+                'tsl2.id'
+            )
+            ->where('tsl.id', '<>', null)
+            ->with([
+                'product_images',
+                'stock_products',
+                "brand",
+                "contact",
+                "unit",
+                "category",
+                "warranty"
+            ])
+            ->select(
                 'products.id',
                 'products.name as product',
                 'products.type',
@@ -103,93 +146,197 @@ class ProductController extends Controller
                 'products.brand_id',
                 'products.category_id',
                 'products.contact_id',
-                'products.warranty_id'
-            )->groupBy('products.id');
+                'products.warranty_id',
+                'tsl.unit_price',
+                'tsl.purchase_price',
+                'tsl.quantity'
+            )
+            ->groupBy("products.id");
 
-            $stock_id = request()->get('stock_id', null);
-            if (!empty($stock_id)) {
-                $products->whereHas('stock_products', function ($products) use ($stock_id) {
-                    $products->where('stock_products.stock_id', '=', $stock_id);
-                });
-            }
-
-            $status = request()->get('status', null);
-            if (!empty($status) && $status !== "all") {
-                $products->whereHas('stock_products', function ($products) use ($status) {
-                    $products->where('stock_products.status', '=', $status);
-                });
-            }
-
-            $category_id = request()->get('category_id', null);
-            if (!empty($category_id)) {
-                $products->where('products.category_id', $category_id);
-            }
-
-            $brand_id = request()->get('brand_id', null);
-            if (!empty($brand_id)) {
-                $products->where('products.brand_id', $brand_id);
-            }
-
-            $unit_id = request()->get('unit_id', null);
-            if (!empty($unit_id)) {
-                $products->where('products.unit_id', $unit_id);
-            }
-
-            $tax_id = request()->get('tax_id', null);
-            if (!empty($tax_id)) {
-                $products->where('products.tax', $tax_id);
-            }
-
-            $contact_id = request()->get('contact_id', null);
-            if (!empty($contact_id)) {
-                $products->where('products.contact_id', $contact_id);
-            }
-
-            $active_state = request()->get('active_state', null);
-            if ($active_state == 'active') {
-                $products->Active();
-            }
-            if ($active_state == 'inactive') {
-                $products->Inactive();
-            }
-
-            if (isset($request->barcode) && $request->barcode) {
-                $products->where("products.barcode", "LIKE", "%$request->barcode%");
-            }
-
-            if (isset($request->id) && $request->id) {
-                $products->where("products.id", "LIKE", "%$request->id%");
-            }
-
-            if (isset($request->product_name) && $request->product_name) {
-                $products->where("products.name", "LIKE", "%$request->product_name%");
-            }
-
-            if (isset($request->sku) && $request->sku) {
-                $products->where("products.sku", "LIKE", "%$request->sku%");
-            }
-
-            if (isset($request->keyword) && $request->keyword) {
-                $products->where("products.name", "LIKE", "%$request->keyword%")
-                    ->orWhere("products.sku", "LIKE", "%$request->keyword%");
-            }
-
-            $is_image = request()->get('is_image');
-            if (!empty($is_image)) {
-                $products->where('products.image', "");
-            }
-
-            $products->orderBy('products.created_at', "desc");
-            $products->orderBy('products.name', 'asc');
-            $data = $products->paginate($request->limit);
-
-            return $this->respondSuccess($data);
-        } catch (\Exception $e) {
-//            dd($e);
-            $message = $e->getMessage();
-
-            return $this->respondWithError($message, [], 500);
+        $stock_id = request()->get('stock_id', null);
+        if (!empty($stock_id)) {
+            $products->whereHas('stock_products', function ($products) use ($stock_id) {
+                $products->where('stock_products.stock_id', '=', $stock_id);
+            });
         }
+
+        $status = request()->get('status', null);
+        if (!empty($status) && $status !== "all") {
+            $products->whereHas('stock_products', function ($products) use ($status) {
+                $products->where('stock_products.status', '=', $status);
+            });
+        }
+
+        $category_id = request()->get('category_id', null);
+        if (!empty($category_id)) {
+            $products->where('products.category_id', $category_id);
+        }
+
+        $brand_id = request()->get('brand_id', null);
+        if (!empty($brand_id)) {
+            $products->where('products.brand_id', $brand_id);
+        }
+
+        $unit_id = request()->get('unit_id', null);
+        if (!empty($unit_id)) {
+            $products->where('products.unit_id', $unit_id);
+        }
+
+        $tax_id = request()->get('tax_id', null);
+        if (!empty($tax_id)) {
+            $products->where('products.tax', $tax_id);
+        }
+
+        $active_state = request()->get('active_state', null);
+        if ($active_state == 'active') {
+            $products->Active();
+        }
+        if ($active_state == 'inactive') {
+            $products->Inactive();
+        }
+
+        if (isset($request->barcode) && $request->barcode) {
+            $products->where("products.barcode", "LIKE", "%$request->barcode%");
+        }
+
+        if (isset($request->id) && $request->id) {
+            $products->where("products.id", "LIKE", "%$request->id%");
+        }
+
+        if (isset($request->product_name) && $request->product_name) {
+            $products->where("products.name", "LIKE", "%$request->product_name%");
+        }
+
+        if (isset($request->sku) && $request->sku) {
+            $products->where("products.sku", "LIKE", "%$request->sku%");
+        }
+
+        if (isset($request->keyword) && $request->keyword) {
+            $products->where("products.name", "LIKE", "%$request->keyword%")
+                ->orWhere("products.sku", "LIKE", "%$request->keyword%")
+                ->orWhere("products.barcode", "LIKE", "%$request->keyword%");
+        }
+
+        $is_image = request()->get('is_image');
+        if (!empty($is_image)) {
+            $products->where('products.image', "");
+        }
+
+        $products->orderBy('products.created_at', "desc");
+        $products->orderBy('products.name', 'asc');
+
+        $data = $products->paginate($request->limit);
+        return $data;
+    }
+
+    private function getListAllProduct($request, $business_id)
+    {
+        $query = Product::where('products.business_id', $business_id)
+            ->with([
+                'product_images',
+                'stock_products',
+                "brand",
+                "contact",
+                "unit",
+                "category",
+                "warranty"
+            ])
+            ->where('products.type', '!=', 'modifier');
+
+        $products = $query->select(
+            'products.id',
+            'products.name as product',
+            'products.type',
+            'products.sku',
+            'products.barcode',
+            'products.image',
+            'products.not_for_selling',
+            'products.is_inactive',
+            'products.unit_id',
+            'products.brand_id',
+            'products.category_id',
+            'products.contact_id',
+            'products.warranty_id'
+        )->groupBy('products.id');
+
+        $stock_id = request()->get('stock_id', null);
+        if (!empty($stock_id)) {
+            $products->whereHas('stock_products', function ($products) use ($stock_id) {
+                $products->where('stock_products.stock_id', '=', $stock_id);
+            });
+        }
+
+        $status = request()->get('status', null);
+        if (!empty($status) && $status !== "all") {
+            $products->whereHas('stock_products', function ($products) use ($status) {
+                $products->where('stock_products.status', '=', $status);
+            });
+        }
+
+        $category_id = request()->get('category_id', null);
+        if (!empty($category_id)) {
+            $products->where('products.category_id', $category_id);
+        }
+
+        $brand_id = request()->get('brand_id', null);
+        if (!empty($brand_id)) {
+            $products->where('products.brand_id', $brand_id);
+        }
+
+        $unit_id = request()->get('unit_id', null);
+        if (!empty($unit_id)) {
+            $products->where('products.unit_id', $unit_id);
+        }
+
+        $tax_id = request()->get('tax_id', null);
+        if (!empty($tax_id)) {
+            $products->where('products.tax', $tax_id);
+        }
+
+        $active_state = request()->get('active_state', null);
+        if ($active_state == 'active') {
+            $products->Active();
+        }
+        if ($active_state == 'inactive') {
+            $products->Inactive();
+        }
+
+        $contact_id = request()->get('contact_id', null);
+        if (!empty($contact_id) && (empty($request->showAll) || $request->showAll != "true" )) {
+            $products->where('products.contact_id', $contact_id);
+        }
+
+        if (isset($request->barcode) && $request->barcode) {
+            $products->where("products.barcode", "LIKE", "%$request->barcode%");
+        }
+
+        if (isset($request->id) && $request->id) {
+            $products->where("products.id", "LIKE", "%$request->id%");
+        }
+
+        if (isset($request->product_name) && $request->product_name) {
+            $products->where("products.name", "LIKE", "%$request->product_name%");
+        }
+
+        if (isset($request->sku) && $request->sku) {
+            $products->where("products.sku", "LIKE", "%$request->sku%");
+        }
+
+        if (isset($request->keyword) && $request->keyword) {
+            $products->where("products.name", "LIKE", "%$request->keyword%")
+                ->orWhere("products.sku", "LIKE", "%$request->keyword%")
+                ->orWhere("products.barcode", "LIKE", "%$request->keyword%");
+        }
+
+        $is_image = request()->get('is_image');
+        if (!empty($is_image)) {
+            $products->where('products.image', "");
+        }
+
+        $products->orderBy('products.created_at', "desc");
+        $products->orderBy('products.name', 'asc');
+        $data = $products->paginate($request->limit);
+        return $data;
     }
 
     /**
@@ -229,7 +376,9 @@ class ProductController extends Controller
                 'sub_unit_ids',
                 'thumbnail',
                 'priceData',
-                'images'
+                'listVariation',
+                'images',
+                'enable_sr_no'
             ];
 
             $module_form_fields = $this->moduleUtil->getModuleFormField('product_form_fields');
@@ -257,6 +406,10 @@ class ProductController extends Controller
             $product_details['image'] = !empty($thumbnail) ? str_replace(url("/"), "", $thumbnail) : "";
 
             $product_details['warranty_id'] = !empty($request->input('warranty_id')) ? $request->input('warranty_id') : null;
+
+            if (isset($product_details['enable_sr_no'])) {
+                $product_details['enable_sr_no'] = $product_details['enable_sr_no'] == true ? 1 : 0;
+            }
 
             $product = Product::create($product_details);
 
@@ -315,6 +468,7 @@ class ProductController extends Controller
                         'quantity' => !empty($item["quantity"]) ? $item["quantity"] : 0,
                         'purchase_price' => !empty($item["purchase_price"]) ? $item["purchase_price"] : 0,
                         'unit_price' => !empty($item["sell_price"]) ? $item["sell_price"] : 0,
+                        'sale_price' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
                         'status' => $status,
                         'created_at' => now(),
                     ];
@@ -335,8 +489,8 @@ class ProductController extends Controller
                 foreach ($variations as $item) {
                     if (isset($item["is_new"]) && $item["is_new"] === true) {
                         $dataProductVariations = [
-                            'name' => !empty($item["name"]) ? $item["name"] : 0,
-                            'value' => !empty($item["value"]) ? $item["value"] : 0,
+                            'name' => !empty($item["name"]) ? $item["name"] : "",
+                            'value' => !empty($item["value"]) ? $item["value"] : "",
                             'product_id' => $product->id,
                             'created_at' => now(),
                         ];
@@ -347,6 +501,43 @@ class ProductController extends Controller
 
                 if (count($dataVariations) > 0) {
                     $variationResult = ProductVariation::insert($dataVariations);
+                    if (!$variationResult) {
+                        $message = "Không thể lưu dữ liệu";
+                        return $this->respondWithError($message, [], 503);
+                    }
+                }
+            }
+
+            $listVariation = $request->listVariation;
+
+            if (!empty($listVariation) && count($listVariation) > 0) {
+                $dataListVariations = [];
+
+                foreach ($listVariation as $item) {
+                    if (isset($item["is_new"]) && $item["is_new"] === true) {
+                        $urlImage = !empty($item["images"]) ? str_replace(url("/"), "", $item["images"]) : "";
+
+                        $dataVariations = [
+                            'name' => !empty($item["name"]) ? $item["name"] : "",
+                            'description' => !empty($item["description"]) ? $item["description"] : "",
+                            'allowSerial' => !empty($item["allowSerial"]) ? $item["allowSerial"] : 0,
+                            'barcode' => !empty($item["barcode"]) ? $item["barcode"] : "",
+                            'sub_sku' => !empty($item["sku"]) ? $item["sku"] : "",
+                            'image' => !empty($item["images"]) ? $urlImage : "",
+                            'status' => !empty($item["status"]) ? $item["status"] : "active",
+                            'default_sell_price' => !empty($item["unit_price"]) ? $item["unit_price"] : 0,
+                            'sell_price_inc_tax' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
+                            'product_id' => $product->id,
+                            'created_at' => now(),
+                        ];
+
+                        array_push($dataListVariations, $dataVariations);
+                    }
+                }
+
+
+                if (count($dataListVariations) > 0) {
+                    $variationResult = Variation::insert($dataListVariations);
                     if (!$variationResult) {
                         $message = "Không thể lưu dữ liệu";
                         return $this->respondWithError($message, [], 503);
@@ -390,6 +581,7 @@ class ProductController extends Controller
                 ->where('id', $id)
                 ->with([
                     'product_images',
+                    'variations:id,product_id,name,sub_sku,description,image,barcode,allowSerial,status,default_sell_price,sell_price_inc_tax',
                     'product_variations',
                     'stock_products',
                     'stock_products.stock',
@@ -397,7 +589,8 @@ class ProductController extends Controller
                     "contact",
                     "unit",
                     "category",
-                    "warranty"
+                    "warranty",
+                    "product_serial:id,product_id,serial,is_sell"
                 ])
                 ->first();
 
@@ -451,6 +644,7 @@ class ProductController extends Controller
                 'images',
                 'remove_images',
                 'not_for_selling',
+                'enable_sr_no',
             ]);
 
             $product = Product::where('business_id', $business_id)
@@ -533,6 +727,10 @@ class ProductController extends Controller
                 $product->sub_unit_ids = $product_details['sub_unit_ids'];
             }
 
+            if (isset($product_details['enable_sr_no'])) {
+                $product->enable_sr_no = $product_details['enable_sr_no'] == true ? 1 : 0;
+            }
+
             $thumbnail = $request->input('thumbnail');
             if (isset($thumbnail)) {
                 $product->image = !empty($thumbnail) ? str_replace(url("/"), "", $thumbnail) : "";
@@ -574,6 +772,7 @@ class ProductController extends Controller
                         'quantity' => !empty($item["quantity"]) ? $item["quantity"] : 0,
                         'purchase_price' => !empty($item["purchase_price"]) ? $item["purchase_price"] : 0,
                         'unit_price' => !empty($item["sell_price"]) ? $item["sell_price"] : 0,
+                        'sale_price' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
                         'status' => $status,
                         'updated_at' => now(),
                     ];
@@ -645,6 +844,82 @@ class ProductController extends Controller
                 }
             }
 
+            $listVariation = $request->listVariation;
+
+            if (!empty($listVariation) && count($listVariation) > 0) {
+                $dataListVariations = [];
+
+                foreach ($listVariation as $item) {
+                    $urlImage = !empty($item["images"]) ? str_replace(url("/"), "", $item["images"]) : "";
+
+                    if (isset($item["is_new"]) && $item["is_new"] === true) {
+                        $dataVariations = [
+                            'name' => !empty($item["name"]) ? $item["name"] : "",
+                            'description' => !empty($item["description"]) ? $item["description"] : "",
+                            'allowSerial' => !empty($item["allowSerial"]) ? $item["allowSerial"] : 0,
+                            'barcode' => !empty($item["barcode"]) ? $item["barcode"] : "",
+                            'sub_sku' => !empty($item["sku"]) ? $item["sku"] : "",
+                            'image' => !empty($item["images"]) ? $urlImage : "",
+                            'status' => !empty($item["status"]) ? $item["status"] : "active",
+                            'default_sell_price' => !empty($item["unit_price"]) ? $item["unit_price"] : 0,
+                            'sell_price_inc_tax' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
+                            'product_id' => $product->id,
+                            'created_at' => now(),
+                        ];
+
+                        array_push($dataListVariations, $dataVariations);
+                    }
+
+                    if (isset($item["is_update"]) && $item["is_update"] === true) {
+                        $dataVariations = [
+                            'name' => !empty($item["name"]) ? $item["name"] : "",
+                            'description' => !empty($item["description"]) ? $item["description"] : "",
+                            'allowSerial' => !empty($item["allowSerial"]) ? $item["allowSerial"] : 0,
+                            'barcode' => !empty($item["barcode"]) ? $item["barcode"] : "",
+                            'sub_sku' => !empty($item["sku"]) ? $item["sku"] : "",
+                            'image' => !empty($item["images"]) ? $urlImage : "",
+                            'status' => !empty($item["status"]) ? $item["status"] : "active",
+                            'default_sell_price' => !empty($item["unit_price"]) ? $item["unit_price"] : 0,
+                            'sell_price_inc_tax' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
+                            'updated_at' => now(),
+                        ];
+						
+						
+							return $this->respondWithError($urlImage, [], 500);
+
+                        if (isset($item["is_remove"]) && $item["is_remove"] === true) {
+                            $variationResult = Variation::where("product_id", $product->id)
+                                ->where("id", $item["id"])
+                                ->delete();
+
+                            if (!$variationResult) {
+                                $message = "Không thể lưu dữ liệu";
+                                return $this->respondWithError($message, [], 503);
+                            }
+                        } else {
+                            $variationResult = Variation::where("product_id", $product->id)
+                                ->where("id", $item["id"])
+                                ->update($dataVariations);
+
+                            if (!$variationResult) {
+                                $message = "Không thể lưu dữ liệu";
+                                return $this->respondWithError($message, [], 503);
+                            }
+                        }
+                    }
+                }
+
+
+                if (count($dataListVariations) > 0) {
+                    $variationResult = Variation::insert($dataListVariations);
+                    if (!$variationResult) {
+                        $message = "Không thể lưu dữ liệu";
+                        return $this->respondWithError($message, [], 503);
+                    }
+                }
+            }
+
+
             // remove_images
             $requestImages = $request->input('images');
             if (!empty($requestImages) && count($requestImages) > 0) {
@@ -688,6 +963,54 @@ class ProductController extends Controller
             $message = "Cập nhật sản phẩm thành công";
 
             return $this->respondSuccess($product, $message);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    public function updateStatus(Request $request)
+    {
+        try {
+            $ids = $request->ids;
+
+            if (!$ids || count($ids) === 0) {
+                $res = [
+                    'status' => 'danger',
+                    'msg' => "Không tìm sản phẩm"
+                ];
+
+                return response()->json($res, 404);
+            }
+
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+            $stock_id = $request->stock_id;
+
+            $status = $request->status;
+
+            if (empty($status)) {
+                $res = [
+                    'status' => 'danger',
+                    'msg' => "Không có dữ liệu được cập nhật"
+                ];
+
+                return response()->json($res, 500);
+            }
+
+            $dataUpdate = [
+                'status' => $status
+            ];
+
+            $transaction = StockProduct::where("stock_id", $stock_id)
+                ->whereIn('product_id', $ids)
+                ->update($dataUpdate);
+
+            DB::commit();
+
+            return $this->respondSuccess($transaction);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -787,185 +1110,176 @@ class ProductController extends Controller
 
     }
 
-    /**
-     * Get subcategories list for a category.
-     *
-     * @param  \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
-     */
-    public function getSubCategories(Request $request)
+    public function importData(Request $request)
     {
-        if (!empty($request->input('cat_id'))) {
-            $category_id = $request->input('cat_id');
-            $business_id = $request->session()->get('user.business_id');
-            $sub_categories = Category::where('business_id', $business_id)
-                ->where('parent_id', $category_id)
-                ->select(['name', 'id'])
-                ->get();
-            $html = '<option value="">None</option>';
-            if (!empty($sub_categories)) {
-                foreach ($sub_categories as $sub_category) {
-                    $html .= '<option value="' . $sub_category->id . '">' . $sub_category->name . '</option>';
+        DB::beginTransaction();
+
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            //Set maximum php execution time
+            ini_set('max_execution_time', 0);
+            ini_set('memory_limit', -1);
+
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+
+                $parsed_array = Excel::toArray([], $file);
+
+                //Remove header row
+                $imported_data = array_splice($parsed_array[0], 1);
+
+                $formated_data = [];
+                $prices_data = [];
+
+                $is_valid = true;
+                $error_msg = '';
+
+                $total_rows = count($imported_data);
+
+                foreach ($imported_data as $key => $value) {
+                    //Check if any column is missing
+                    if (count($value) < 8 ) {
+                        $is_valid =  false;
+                        $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
+                        break;
+                    }
+
+                    $row_no = $key + 1;
+                    $product_array = [];
+                    $product_array['business_id'] = $business_id;
+                    $product_array['created_by'] = $user_id;
+                    $product_array['type'] = "single";
+                    $product_array['barcode_type'] = 'C128';
+
+                    //Add product name
+                    $product_name = trim($value[1]);
+                    if (!empty($product_name)) {
+                        $product_array['name'] = $product_name;
+                    } else {
+                        $is_valid =  false;
+                        $error_msg = "Tên sản phẩm không được tìm thấy ở hàng thứ. $row_no";
+                        break;
+                    }
+
+                    //Add unit
+                    $unit_name = trim($value[3]);
+                    if (!empty($unit_name)) {
+                        $unit = Unit::where('business_id', $business_id)
+                            ->where(function ($query) use ($unit_name) {
+                                $query->where('short_name', $unit_name)
+                                    ->orWhere('actual_name', $unit_name);
+                            })->first();
+                        if (!empty($unit)) {
+                            $product_array['unit_id'] = $unit->id;
+                        } else {
+                            $is_valid = false;
+                            $error_msg = "Đơn vị không được tìm thấy ở hàng thứ . $row_no";
+                            break;
+                        }
+                    } else {
+                        $is_valid =  false;
+                        $error_msg = "Đơn vị không được tìm thấy ở hàng thứ . $row_no";
+                        break;
+                    }
+
+                    // supplier
+                    $category_name = trim($value[2]);
+                    if (!empty($category_name)) {
+                        $supplier = Contact::where('type', "supplier")
+                            ->where(function ($query) use ($category_name) {
+                                $query->where('supplier_business_name', $category_name)
+                                    ->orWhere('first_name', $category_name);
+                            })->first();
+                        if (!empty($supplier)) {
+                            $product_array['contact_id'] = $supplier->id;
+                        } else {
+                            $is_valid = false;
+                            $error_msg = "Nhà cung cấp không được tìm thấy ở hàng thứ. $row_no";
+                            break;
+                        }
+                    } else {
+                        $is_valid =  false;
+                        $error_msg = "Nhà cung cấp không được tìm thấy ở hàng thứ. $row_no";
+                        break;
+                    }
+
+                    //Add SKU
+                    $sku = trim($value[0]);
+                    if (!empty($sku)) {
+                        $product_array['sku'] = $sku;
+                        //Check if product with same SKU already exist
+                        $is_exist = Product::where('sku', $product_array['sku'])
+                            ->where('business_id', $business_id)
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "$sku SKU đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    } else {
+                        $product_array['sku'] = ' ';
+                    }
+
+                    // sell price
+                    $sell_price = trim($value[6]);
+                    $purchase_price = trim($value[5]);
+                    $quantity = trim($value[7]);
+
+                    if (!$sell_price) $sell_price = 0;
+                    if (!$purchase_price) $purchase_price = 0;
+                    if (!$quantity) $quantity = 0;
+
+                    $formated_data[] = $product_array;
+                    $prices_data[] = [
+                        "sell_price"=> $sell_price,
+                        "purchase_price" => $purchase_price,
+                        "quantity" => $quantity
+                    ];
+                }
+
+                if (!$is_valid) {
+                    throw new \Exception($error_msg);
+                }
+
+                if (!empty($formated_data)) {
+                    foreach ($formated_data as $index => $product_data) {
+                        //Create new product
+                        $product = Product::create($product_data);
+
+                        $data_stock = [
+                            "stock_id" => 6,
+                            "product_id" => $product->id,
+                            "purchase_price" => $prices_data[$index]['purchase_price'],
+                            "unit_price" => $prices_data[$index]['sell_price'],
+                            "quantity" => $prices_data[$index]['quantity'],
+                            "status" => "approve",
+                        ];
+
+                        $stock_product = StockProduct::create($data_stock);
+
+                        //If auto generate sku generate new sku
+                        if ($product->sku == ' ') {
+                            $sku = $this->productUtil->generateProductSku($product->id);
+                            $product->sku = $sku;
+                            $product->save();
+                        }
+                    }
                 }
             }
-            echo $html;
-            exit;
+
+            DB::commit();
+            $message = "Nhập liệu sản phẩm thành công";
+
+            return $this->respondSuccess($product, $message);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
         }
     }
 
-    /**
-     * Get product form parts.
-     *
-     * @param  \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
-     */
-    public function getProductVariationFormPart(Request $request)
-    {
-        $business_id = $request->session()->get('user.business_id');
-        $business = Business::findorfail($business_id);
-        $profit_percent = $business->default_profit_percent;
-
-        $action = $request->input('action');
-        if ($request->input('action') == "add") {
-            if ($request->input('type') == 'single') {
-                return view('product.partials.single_product_form_part')
-                    ->with(['profit_percent' => $profit_percent]);
-            } elseif ($request->input('type') == 'variable') {
-                $variation_templates = VariationTemplate::where('business_id', $business_id)->pluck('name', 'id')->toArray();
-                $variation_templates = ["" => __('messages.please_select')] + $variation_templates;
-
-                return view('product.partials.variable_product_form_part')
-                    ->with(compact('variation_templates', 'profit_percent', 'action'));
-            } elseif ($request->input('type') == 'combo') {
-                return view('product.partials.combo_product_form_part')
-                    ->with(compact('profit_percent', 'action'));
-            }
-        } elseif ($request->input('action') == "edit" || $request->input('action') == "duplicate") {
-            $product_id = $request->input('product_id');
-            $action = $request->input('action');
-            if ($request->input('type') == 'single') {
-                $product_deatails = ProductVariation::where('product_id', $product_id)
-                    ->with(['variations', 'variations.media'])
-                    ->first();
-
-                return view('product.partials.edit_single_product_form_part')
-                    ->with(compact('product_deatails', 'action'));
-            } elseif ($request->input('type') == 'variable') {
-                $product_variations = ProductVariation::where('product_id', $product_id)
-                    ->with(['variations', 'variations.media'])
-                    ->get();
-                return view('product.partials.variable_product_form_part')
-                    ->with(compact('product_variations', 'profit_percent', 'action'));
-            } elseif ($request->input('type') == 'combo') {
-                $product_deatails = ProductVariation::where('product_id', $product_id)
-                    ->with(['variations', 'variations.media'])
-                    ->first();
-                $combo_variations = $this->__getComboProductDetails($product_deatails['variations'][0]->combo_variations, $business_id);
-
-                $variation_id = $product_deatails['variations'][0]->id;
-                return view('product.partials.combo_product_form_part')
-                    ->with(compact('combo_variations', 'profit_percent', 'action', 'variation_id'));
-            }
-        }
-    }
-
-    /**
-     * Get product form parts.
-     *
-     * @param  \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
-     */
-    public function getVariationValueRow(Request $request)
-    {
-        $business_id = $request->session()->get('user.business_id');
-        $business = Business::findorfail($business_id);
-        $profit_percent = $business->default_profit_percent;
-
-        $variation_index = $request->input('variation_row_index');
-        $value_index = $request->input('value_index') + 1;
-
-        $row_type = $request->input('row_type', 'add');
-
-        return view('product.partials.variation_value_row')
-            ->with(compact('profit_percent', 'variation_index', 'value_index', 'row_type'));
-    }
-
-    /**
-     * Get product form parts.
-     *
-     * @param  \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
-     */
-    public function getProductVariationRow(Request $request)
-    {
-        $business_id = $request->session()->get('user.business_id');
-        $business = Business::findorfail($business_id);
-        $profit_percent = $business->default_profit_percent;
-
-        $variation_templates = VariationTemplate::where('business_id', $business_id)
-            ->pluck('name', 'id')->toArray();
-        $variation_templates = ["" => __('messages.please_select')] + $variation_templates;
-
-        $row_index = $request->input('row_index', 0);
-        $action = $request->input('action');
-
-        return view('product.partials.product_variation_row')
-            ->with(compact('variation_templates', 'row_index', 'action', 'profit_percent'));
-    }
-
-    /**
-     * Get product form parts.
-     *
-     * @param  \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
-     */
-    public function getVariationTemplate(Request $request)
-    {
-        $business_id = $request->session()->get('user.business_id');
-        $business = Business::findorfail($business_id);
-        $profit_percent = $business->default_profit_percent;
-
-        $template = VariationTemplate::where('id', $request->input('template_id'))
-            ->with(['values'])
-            ->first();
-        $row_index = $request->input('row_index');
-
-        return view('product.partials.product_variation_template')
-            ->with(compact('template', 'row_index', 'profit_percent'));
-    }
-
-    /**
-     * Return the view for combo product row
-     *
-     * @param  \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
-     */
-    public function getComboProductEntryRow(Request $request)
-    {
-        if (request()->ajax()) {
-            $product_id = $request->input('product_id');
-            $variation_id = $request->input('variation_id');
-            $business_id = $request->session()->get('user.business_id');
-
-            if (!empty($product_id)) {
-                $product = Product::where('id', $product_id)
-                    ->with(['unit'])
-                    ->first();
-
-                $query = Variation::where('product_id', $product_id)
-                    ->with(['product_variation']);
-
-                if ($variation_id !== '0') {
-                    $query->where('id', $variation_id);
-                }
-                $variations = $query->get();
-
-                $sub_units = $this->productUtil->getSubUnits($business_id, $product['unit']->id);
-
-                return view('product.partials.combo_product_entry_row')
-                    ->with(compact('product', 'variations', 'sub_units'));
-            }
-        }
-    }
 
 }

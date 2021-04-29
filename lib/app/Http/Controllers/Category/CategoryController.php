@@ -8,7 +8,9 @@ use App\Utils\ModuleUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Yajra\DataTables\Facades\DataTables;
+use Excel;
 
 class CategoryController extends Controller
 {
@@ -37,19 +39,28 @@ class CategoryController extends Controller
     public function list(Request $request)
     {
         try {
-
-            $category_type = $request->type;
-
-//            $business_id = Auth::guard('api')->user()->business_id;
-            $business_id = 1;
+            $business_id = Auth::guard('api')->user()->business_id;
 
             $category = Category::where('business_id', $business_id)
-                ->where('category_type', $category_type)
-                ->select(['name', 'short_code', 'description', 'id', 'parent_id']);
+                ->with(["parent"])
+                ->select(['name', 'short_code', 'description', 'id', 'parent_id', 'slug']);
 
             if (isset($request->keyword) && $request->keyword) {
                 $category->where("name", "LIKE", "%$request->keyword%");
             }
+
+            if (isset($request->type) && $request->type) {
+                $category->where("category_type",$request->type);
+            }
+
+            $parent_id = request()->get('parent_id', null);
+            if (!empty($parent_id)) {
+                $category->where('parent_id', $parent_id)
+                    ->orWhere('id', $parent_id);
+            }
+
+            $category->orderBy('created_at', "desc");
+            $category->orderBy('name', "asc");
 
             $data = $category->paginate($request->limit);
 
@@ -72,18 +83,30 @@ class CategoryController extends Controller
         DB::beginTransaction();
 
         try {
-            $input = $request->only(['name', 'short_code', 'category_type', 'description']);
+            $input = $request->only(['name', 'short_code', 'type', 'description', 'image', "slug", "parent_id"]);
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            if (!empty($request->input('add_as_sub_cat')) && $request->input('add_as_sub_cat') == 1 && !empty($request->input('parent_id'))) {
-                $input['parent_id'] = $request->input('parent_id');
-            } else {
-                $input['parent_id'] = 0;
-            }
-
             $input['business_id'] = $business_id;
             $input['created_by'] = $user_id;
+
+            $slug = '';
+
+            if(isset($request->name) && $request->name) {
+                $slug = Str::slug($request->name, '-');
+            }
+
+            if(isset($request->slug) && $request->slug) {
+                $slug = $request->slug;
+            }
+
+            $input["slug"] = $slug;
+            $input['category_type'] = $request->type;
+
+            if (isset($input['image'])) {
+                $urlImage = !empty($input["image"]) ? str_replace(url("/"), "", $input["image"]) : "";
+                $input['image'] = $urlImage;
+            }
 
             $category = Category::create($input);
 
@@ -112,9 +135,9 @@ class CategoryController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $brand = Category::where('business_id', $business_id)->findOrFail($id);
+            $category = Category::where('business_id', $business_id)->findOrFail($id);
 
-            return $this->respondSuccess($brand);
+            return $this->respondSuccess($category);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -135,23 +158,46 @@ class CategoryController extends Controller
         DB::beginTransaction();
 
         try {
-            $input = $request->only(['name', 'description']);
+            $input = $request->only(['name', 'short_code', 'type', 'description', 'image', "slug", "parent_id"]);
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
             $category = Category::where('business_id', $business_id)->findOrFail($id);
             $category->name = $input['name'];
-            $category->description = $input['description'];
-
-            if (!empty($request->input('short_code'))) {
-                $category->short_code = $request->input('short_code');
+            if (isset($input['short_code'])) {
+                $category->short_code = $input['short_code'];
             }
 
-            if (!empty($request->input('add_as_sub_cat')) && $request->input('add_as_sub_cat') == 1 && !empty($request->input('parent_id'))) {
-                $category->parent_id = $request->input('parent_id');
-            } else {
-                $category->parent_id = 0;
+            if (isset($input['type'])) {
+                $category->category_type = $input['type'];
             }
+
+            if (isset($input['description'])) {
+                $category->description = $input['description'];
+            }
+
+            if (isset($input['image'])) {
+                $urlImage = !empty($input["image"]) ? str_replace(url("/"), "", $input["image"]) : "";
+
+                $category->image = $urlImage;
+            }
+
+            $slug = '';
+
+            if(isset($request->name) && $request->name) {
+                $slug = Str::slug($request->name, '-');
+            }
+
+            if(isset($request->slug) && $request->slug) {
+                $slug = $request->slug;
+            }
+
+            $category->slug = $slug;
+
+            if (isset($input['parent_id'])) {
+                $category->parent_id = $input['parent_id'];
+            }
+
             $category->save();
 
             DB::commit();
@@ -176,7 +222,6 @@ class CategoryController extends Controller
     public function delete($id)
     {
         DB::beginTransaction();
-
             try {
                 $business_id = Auth::guard('api')->user()->business_id;
                 $user_id = Auth::guard('api')->user()->id;
@@ -228,4 +273,101 @@ class CategoryController extends Controller
                 ->with(compact('module_category_data', 'category_type'));
         }
     }
+
+
+    public function importData(Request $request)
+    {
+        DB::beginTransaction();
+
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            //Set maximum php execution time
+            ini_set('max_execution_time', 0);
+            ini_set('memory_limit', -1);
+
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+
+                $parsed_array = Excel::toArray([], $file);
+
+                //Remove header row
+                $imported_data = array_splice($parsed_array[0], 1);
+
+                $formated_data = [];
+                $prices_data = [];
+
+                $is_valid = true;
+                $error_msg = '';
+
+                $total_rows = count($imported_data);
+
+                foreach ($imported_data as $key => $value) {
+                    //Check if any column is missing
+                    if (count($value) < 2 ) {
+                        $is_valid =  false;
+                        $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
+                        break;
+                    }
+
+                    $row_no = $key + 1;
+                    $category_array = [];
+                    $category_array['business_id'] = $business_id;
+                    $category_array['created_by'] = $user_id;
+                    $category_array['category_type'] = "product";
+
+
+                    //Add SKU
+                    $actual_name = trim($value[0]);
+                    if (!empty($actual_name)) {
+                        $category_array['name'] = $actual_name;
+                        //Check if product with same SKU already exist
+                        $is_exist = Category::where('name', $category_array['name'])
+                            ->where('business_id', $business_id)
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "Tên danh mục : $actual_name đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu tên danh mục";
+                        break;
+                    }
+
+                    //Add product name
+                    $description = trim($value[1]);
+                    if (!empty($description)) {
+                        $category_array['description'] = $description;
+                    }
+
+                    $formated_data[] = $category_array;
+                }
+
+                if (!$is_valid) {
+                    throw new \Exception($error_msg);
+                }
+
+                if (!empty($formated_data)) {
+                    foreach ($formated_data as $index => $category_data) {
+                        //Create new product
+                        Category::create($category_data);
+                    }
+                }
+            }
+
+            DB::commit();
+            $message = "Nhập liệu danh mục thành công";
+
+            return $this->respondSuccess($message, $message);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
 }

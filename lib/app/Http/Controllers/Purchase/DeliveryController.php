@@ -241,10 +241,12 @@ class DeliveryController extends Controller
         }
     }
 
-    public function change_status(Request $request, $id)
+    public function changeStatus(Request $request)
     {
         try {
-            if (!isset($id) || !$id) {
+            $ids = $request->ids;
+
+            if (!isset($ids) || count($ids) === 0) {
                 $res = [
                     'status' => 'danger',
                     'msg' => "Không tìm thấy đơn hàng"
@@ -258,26 +260,27 @@ class DeliveryController extends Controller
 
             $status = $request->status;
 
-            $dataUpdate = [
-                'status' => $status
-            ];
+            $transaction = [];
 
-            $transaction = DB::table('transactions')
-                ->where('id', $id)
-                ->update($dataUpdate);
+            if ($status === "complete") {
+                foreach ($ids as $id) {
+                    $transaction = Transaction::findOrFail($id);
 
-            $dataLog = [
-                'created_by' => $user_id,
-                'business_id' => $business_id,
-                'log_name' => "Cập nhật trạng thái cầu mua hàng",
-                'subject_id' => $transaction->id
-            ];
-
-            $message = "Chuyển trạng thái mua hàng thành " . $status;
-
-            Activity::history($message, "purchase_request", $dataLog);
+                    $transaction->shipping_status = "complete";
+                    $transaction->res_order_status = "request";
+                    $transaction->save();
+                }
+            } else {
+                $dataUpdate = [
+                    'shipping_status' => $status
+                ];
+                $transaction = DB::table('transactions')
+                    ->whereIn('id', $ids)
+                    ->update($dataUpdate);
+            }
 
             DB::commit();
+
 
             return $this->respondSuccess($transaction);
         } catch (\Exception $e) {

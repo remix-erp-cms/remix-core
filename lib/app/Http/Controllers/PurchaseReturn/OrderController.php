@@ -87,6 +87,10 @@ class OrderController extends Controller
                 'business:id,name',
                 'tax:id,name,amount',
                 'sales_person:id,first_name,user_type',
+                'pending_by:id,first_name,user_type',
+                'approve_by:id,first_name,user_type',
+                'reject_by:id,first_name,user_type',
+                'complete_by:id,first_name,user_type',
                 'accountants',
             ])
                 ->where('transactions.type', 'purchase_return')
@@ -306,7 +310,16 @@ class OrderController extends Controller
                 $transaction_data['status'] = $request->status;
 
                 if ($request->status === "approve") {
+                    $transaction_data['approve_by'] = $user_id;
                     $transaction_data['res_order_status'] = "request";
+                }
+
+                if ($request->status === "pending") {
+                    $transaction_data['pending_by'] = $user_id;
+                }
+
+                if ($request->status === "reject") {
+                    $transaction_data['reject_by'] = $user_id;
                 }
             }
 
@@ -317,7 +330,7 @@ class OrderController extends Controller
 
             //Generate reference number
             if (empty($transaction_data['invoice_no'])) {
-                $transaction_data['invoice_no'] = $ref_count;
+                $transaction_data['invoice_no'] = $this->productUtil->generateReferenceNumber($transaction_data['type'], $ref_count, $business_id, "POR");
             }
 
             $discount = null;
@@ -374,7 +387,7 @@ class OrderController extends Controller
                     'sell_lines',
                     'stock:id,stock_name,stock_type,location_id',
                     'stock.location:id,name,landmark',
-                    'sell_lines.product:id,sku,name,contact_id,unit_id',
+                    'sell_lines.product:id,sku,barcode,name,contact_id,unit_id',
                     'sell_lines.product.contact:id,name',
                     'sell_lines.product.unit:id,actual_name',
                     'sell_lines.product.stock_products',
@@ -383,12 +396,18 @@ class OrderController extends Controller
                     'sell_lines.sub_unit',
                     'location:id,name,landmark,mobile',
                     'payment_lines',
-                    'tax',
-                    'sales_person:id,username,first_name,last_name,contact_number,email'
+                    'tax:id,name,amount',
+                    'sales_person:id,username,first_name,last_name,contact_number,email',
+                    'pending_by:id,first_name,user_type',
+                    'approve_by:id,first_name,user_type',
+                    'reject_by:id,first_name,user_type',
+                    'complete_by:id,first_name,user_type',
+                    'delivery_company:id,name,tracking'
                 )
                 ->select([
                     'transactions.id',
                     'transactions.type',
+                    'transactions.sub_type',
                     'transactions.ref_no',
                     'transactions.transaction_date',
                     'transactions.invoice_no',
@@ -414,12 +433,23 @@ class OrderController extends Controller
                     'transactions.staff_note',
                     'transactions.discount_amount',
                     'transactions.discount_type',
+                    'transactions.payment_method',
                     'transactions.service_custom_field_1',
                     'transactions.service_custom_field_2',
+                    'transactions.service_custom_field_3',
+                    'transactions.delivery_company_id',
                     'transactions.shipping_address',
+                    'transactions.shipping_type',
+                    'transactions.shipping_charges',
                 ])
                 ->firstOrFail();
 
+            foreach ($purchase->sell_lines as $key => $value) {
+                if (!empty($value->sub_unit_id)) {
+                    $formated_purchase_line = $this->productUtil->changePurchaseLineUnit($value, $business_id);
+                    $purchase->sell_lines[$key] = $formated_purchase_line;
+                }
+            }
             return $this->respondSuccess($purchase);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -446,15 +476,9 @@ class OrderController extends Controller
 
             $transaction = Transaction::findOrFail($id);
 
-            if (isset($transaction->ref_no) && is_numeric($transaction->ref_no)) {
-                $order = Transaction::findOrFail($transaction->ref_no);
-                if ($order && $order->id) {
-                    $order->status = "po_pending";
-                    $order->save();
-                }
-            }
-
             $transaction->status = "pending";
+            $transaction->pendign_by = $user_id;
+
             $transaction->save();
 
             $dataLog = [
@@ -493,16 +517,9 @@ class OrderController extends Controller
 
             $transaction = Transaction::findOrFail($id);
 
-            if (isset($transaction->ref_no) && is_numeric($transaction->ref_no)) {
-                $order = Transaction::findOrFail($transaction->ref_no);
-                if ($order && $order->id) {
-                    $order->status = "complete";
-                    $order->save();
-                }
-            }
-
             $transaction->status = "approve";
             $transaction->res_order_status = "request";
+            $transaction->approve_by = $user_id;
 
             $transaction->save();
 
@@ -551,6 +568,7 @@ class OrderController extends Controller
             }
 
             $transaction->status = "reject";
+            $transaction->reject_by = $user_id;
             $transaction->save();
 
             $dataLog = [
@@ -565,6 +583,66 @@ class OrderController extends Controller
             Activity::history($message, 'purchase_return', $dataLog);
 
             DB::commit();
+
+            return $this->respondSuccess($transaction);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    public function changeStatus(Request $request)
+    {
+        try {
+            $ids = $request->ids;
+
+            if (!isset($ids) || count($ids) === 0) {
+                $res = [
+                    'status' => 'danger',
+                    'msg' => "Không tìm thấy đơn hàng"
+                ];
+
+                return response()->json($res, 404);
+            }
+
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            $status = $request->status;
+
+            $transaction = [];
+
+            if ($status === "approve") {
+                foreach ($ids as $id) {
+                    $transaction = Transaction::findOrFail($id);
+
+                    $transaction->approve_by = $user_id;
+                    $transaction->status = "approve";
+                    $transaction->res_order_status = "request";
+                    $transaction->save();
+                }
+            } else {
+                $dataUpdate = [
+                    'status' => $status
+                ];
+
+                if ($status === "pending") {
+                    $dataUpdate["pending_by"] = $user_id;
+                }
+
+                if ($status === "reject") {
+                    $dataUpdate["reject_by"] = $user_id;
+                }
+
+                $transaction = DB::table('transactions')
+                    ->whereIn('id', $ids)
+                    ->update($dataUpdate);
+            }
+
+            DB::commit();
+
 
             return $this->respondSuccess($transaction);
         } catch (\Exception $e) {
@@ -606,6 +684,7 @@ class OrderController extends Controller
 
             $transaction->receipt_status = "approve";
             $transaction->shipping_status = "created";
+            $transaction->complete_by = $user_id;
             $result = $this->changeQuantityProduct($transaction->id, $stock_id, $user_id, $business_id);
 
             if(!$result) {
@@ -657,6 +736,8 @@ class OrderController extends Controller
             $transaction = Transaction::findOrFail($id);
 
             $transaction->receipt_status = "reject";
+            $transaction->complete_by = $user_id;
+
             $transaction->save();
 
             $dataLog = [
@@ -777,6 +858,15 @@ class OrderController extends Controller
                 $input['status'] = $request->status;
                 if ($request->status === "approve") {
                     $input['res_order_status'] = "request";
+                    $input['approve_by'] = $user_id;
+                }
+
+                if ($request->status === "pending") {
+                    $input['pending_by'] = $user_id;
+                }
+
+                if ($request->status === "reject") {
+                    $input['reject_by'] = $user_id;
                 }
             }
 

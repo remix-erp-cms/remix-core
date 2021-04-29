@@ -18,9 +18,19 @@ class PurchaseLine extends Model
         return $this->belongsTo(\App\Transaction::class);
     }
 
+    public function sub_transaction()
+    {
+        return $this->belongsTo(\App\Transaction::class, 'sub_transaction_id');
+    }
+
     public function product()
     {
         return $this->belongsTo(\App\Product::class, 'product_id');
+    }
+
+    public function product_serial()
+    {
+        return $this->hasMany(\App\ProductSerial::class);
     }
 
     public function variations()

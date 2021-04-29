@@ -23,6 +23,19 @@ class Brands extends Model
      */
     protected $guarded = ['id'];
 
+    protected $appends = ['image_url'];
+
+
+    public function getImageUrlAttribute()
+    {
+        if (!empty($this->image)) {
+            $image_url = asset($this->image);
+        } else {
+            $image_url = asset('/img/default.png');
+        }
+        return $image_url;
+    }
+
     /**
      * Return list of brands for a business
      *

@@ -15,7 +15,20 @@ class Variation extends Model
      * @var array
      */
     protected $guarded = ['id'];
-    
+
+    protected $appends = ['image_url'];
+
+
+    public function getImageUrlAttribute()
+    {
+        if (!empty($this->image)) {
+            $image_url = asset($this->image);
+        } else {
+            $image_url = asset('/img/default.png');
+        }
+        return $image_url;
+    }
+
     /**
      * The attributes that should be cast to native types.
      *

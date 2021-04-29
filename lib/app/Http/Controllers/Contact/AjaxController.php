@@ -288,7 +288,6 @@ class AjaxController extends Controller
 
             $request->validate([
                 'first_name' => 'required',
-                'mobile' => 'required',
                 'type' => 'required',
             ]);
 
@@ -489,7 +488,42 @@ class AjaxController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $input = $request->only(['type', 'supplier_business_name', 'prefix', 'first_name', 'last_name', 'tax_number', 'pay_term_number', 'pay_term_type', 'mobile', 'address_line_1', 'address_line_2', 'zip_code', 'dob', 'alternate_number', 'city', 'state', 'country', 'landline', 'customer_group_id', 'contact_id', 'custom_field1', 'custom_field2', 'custom_field3', 'custom_field4', 'email', 'shipping_address', 'position']);
+            $input = $request->only([
+                'type',
+                'supplier_business_name',
+                'prefix',
+                'first_name',
+                'last_name',
+                'tax_number',
+                'pay_term_number',
+                'pay_term_type',
+                'mobile',
+                'landline',
+                'alternate_number',
+                'city',
+                'state',
+                'country',
+                'address_line_1',
+                'address_line_2',
+                'customer_group_id',
+                'zip_code',
+                'contact_id',
+                'custom_field1',
+                'custom_field2',
+                'custom_field3',
+                'custom_field4',
+                'email',
+                'shipping_address',
+                'position',
+                'dob',
+                'user_id'
+            ]);
+
+
+            $request->validate([
+                'first_name' => 'required',
+                'type' => 'required',
+            ]);
 
             $array_number = [];
 
@@ -1403,6 +1437,262 @@ class AjaxController extends Controller
 
                 $user->revokePermissionTo($revoked_permissions);
             }
+        }
+    }
+
+    public function importDataSupplier(Request $request)
+    {
+        DB::beginTransaction();
+
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            //Set maximum php execution time
+            ini_set('max_execution_time', 0);
+            ini_set('memory_limit', -1);
+
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+
+                $parsed_array = Excel::toArray([], $file);
+
+                //Remove header row
+                $imported_data = array_splice($parsed_array[0], 1);
+
+                $formated_data = [];
+                $prices_data = [];
+
+                $is_valid = true;
+                $error_msg = '';
+
+                $total_rows = count($imported_data);
+
+                foreach ($imported_data as $key => $value) {
+                    //Check if any column is missing
+                    if (count($value) < 6 ) {
+                        $is_valid =  false;
+                        $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
+                        break;
+                    }
+
+                    $row_no = $key + 1;
+                    $contact_array = [];
+                    $contact_array['business_id'] = $business_id;
+                    $contact_array['created_by'] = $user_id;
+                    $contact_array['type'] = "supplier";
+                    $contact_array['contact_status'] = "active";
+
+
+                    //Add SKU
+                    $actual_name = trim($value[1]);
+                    if (!empty($actual_name)) {
+                        $contact_array['supplier_business_name'] = $actual_name;
+                        $contact_array['name'] = $actual_name;
+                        $contact_array['first_name'] = $actual_name;
+                        //Check if product with same SKU already exist
+                        $is_exist = Contact::where('name', $contact_array['name'])
+                            ->where('business_id', $business_id)
+                            ->where('type', "supplier")
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "Tên liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu tên liên hệ";
+                        break;
+                    }
+
+                    //Add product name
+                    $contact_id = trim($value[0]);
+                    if (!empty($contact_id)) {
+                        $contact_array['contact_id'] = $contact_id;
+                        $is_exist = Contact::where('contact_id', $contact_array['contact_id'])
+                            ->where('business_id', $business_id)
+                            ->where('type', "supplier")
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "ID liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    }
+
+                    $address = trim($value[2]);
+                    if (!empty($address)) {
+                        $contact_array['address_line_1'] = $address;
+                    }
+
+                    $phone = trim($value[3]);
+                    if (!empty($phone)) {
+                        $contact_array['mobile'] = $phone;
+                    }
+
+                    $fax = trim($value[4]);
+                    if (!empty($fax)) {
+                        $contact_array['custom_field4'] = $fax;
+                    }
+
+                    $email = trim($value[5]);
+                    if (!empty($email)) {
+                        $contact_array['email'] = $email;
+                    }
+
+                    $formated_data[] = $contact_array;
+                }
+
+                if (!$is_valid) {
+                    throw new \Exception($error_msg);
+                }
+
+                if (!empty($formated_data)) {
+                    foreach ($formated_data as $index => $contact_data) {
+                        //Create new product
+                        Contact::create($contact_data);
+                    }
+                }
+            }
+
+            DB::commit();
+            $message = "Nhập liệu liên hệ thành công";
+
+            return $this->respondSuccess($message, $message);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    public function importDataCustomer(Request $request)
+    {
+        DB::beginTransaction();
+
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            //Set maximum php execution time
+            ini_set('max_execution_time', 0);
+            ini_set('memory_limit', -1);
+
+            if ($request->hasFile('file')) {
+                $file = $request->file('file');
+
+                $parsed_array = Excel::toArray([], $file);
+
+                //Remove header row
+                $imported_data = array_splice($parsed_array[0], 1);
+
+                $formated_data = [];
+                $prices_data = [];
+
+                $is_valid = true;
+                $error_msg = '';
+
+                $total_rows = count($imported_data);
+
+                foreach ($imported_data as $key => $value) {
+                    //Check if any column is missing
+                    if (count($value) < 6 ) {
+                        $is_valid =  false;
+                        $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
+                        break;
+                    }
+
+                    $row_no = $key + 1;
+                    $contact_array = [];
+                    $contact_array['business_id'] = $business_id;
+                    $contact_array['created_by'] = $user_id;
+                    $contact_array['type'] = "customer";
+                    $contact_array['contact_status'] = "active";
+
+
+                    //Add SKU
+                    $actual_name = trim($value[1]);
+                    if (!empty($actual_name)) {
+                        $contact_array['supplier_business_name'] = $actual_name;
+                        $contact_array['name'] = $actual_name;
+                        $contact_array['first_name'] = $actual_name;
+                        //Check if product with same SKU already exist
+                        $is_exist = Contact::where('name', $contact_array['name'])
+                            ->where('business_id', $business_id)
+                            ->where('type', "customer")
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "Tên liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    } else {
+                        $is_valid = false;
+                        $error_msg = "Thiếu tên liên hệ";
+                        break;
+                    }
+
+                    //Add product name
+                    $contact_id = trim($value[0]);
+                    if (!empty($contact_id)) {
+                        $contact_array['contact_id'] = $contact_id;
+                        $is_exist = Contact::where('contact_id', $contact_array['contact_id'])
+                            ->where('business_id', $business_id)
+                            ->where('type', "customer")
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "ID liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
+                    }
+
+                    $address = trim($value[2]);
+                    if (!empty($address)) {
+                        $contact_array['address_line_1'] = $address;
+                    }
+
+                    $phone = trim($value[3]);
+                    if (!empty($phone)) {
+                        $contact_array['mobile'] = $phone;
+                    }
+
+                    $fax = trim($value[4]);
+                    if (!empty($fax)) {
+                        $contact_array['custom_field4'] = $fax;
+                    }
+
+                    $email = trim($value[5]);
+                    if (!empty($email)) {
+                        $contact_array['email'] = $email;
+                    }
+
+                    $formated_data[] = $contact_array;
+                }
+
+                if (!$is_valid) {
+                    throw new \Exception($error_msg);
+                }
+
+                if (!empty($formated_data)) {
+                    foreach ($formated_data as $index => $contact_data) {
+                        //Create new product
+                        Contact::create($contact_data);
+                    }
+                }
+            }
+
+            DB::commit();
+            $message = "Nhập liệu liên hệ thành công";
+
+            return $this->respondSuccess($message, $message);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
         }
     }
 }

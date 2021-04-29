@@ -186,18 +186,104 @@ class PaymentController extends Controller
             $data = $payment_lines->paginate($request->limit);
 
             $static = PayBill::where('pay_bills.business_id', $business_id)
+                ->with([
+                    'contact:id,name,mobile',
+                    'accountant:id,accountant_no,fee,tax,final_total,credit,debit,type'
+                ])
+                ->join(
+                    "accountants",
+                    "accountants.id",
+                    "=",
+                    "pay_bills.accountant_id"
+                )
                 ->select(
                     [
-                        DB::raw("type, SUM(pay_bills.amount) as total")
+                        DB::raw("pay_bills.type, SUM(pay_bills.amount) as total")
                     ]
                 )
-                ->where('business_id', $business_id)
-                ->whereDate('created_at', '>=', $start_date)
-                ->whereDate('created_at', '<=', $end_date)
-                ->groupBy('type')
-                ->get();
+                ->groupBy('pay_bills.type');
 
-            return $this->respondSuccess($data, null, ["summary" => $static]);
+            if (isset($request->type) && $request->type) {
+                $query = "1 = 1";
+                if ($request->type == "receive") {
+                    $query = "
+                    (
+                    accountants.type = 'receive' 
+                    OR ( accountants.type = 'sell' AND pay_bills.type = 'credit' ) 
+                    )";
+                }
+
+                if ($request->type == "pay") {
+                    $query = "
+                        (
+                            accountants.type = 'pay'
+                            OR ( accountants.type = 'purchase' AND pay_bills.type = 'debit' )
+                        ) ";
+                }
+
+                if ($request->type == "bank_receive") {
+                    $query = "
+                    (
+                    accountants.type = 'bank_receive' 
+                    OR ( accountants.type = 'sell' AND pay_bills.type = 'credit' ) 
+                    )";
+                }
+
+                if ($request->type == "bank_pay") {
+                    $query = "
+                        (
+                            accountants.type = 'bank_pay'
+                            OR ( accountants.type = 'purchase' AND pay_bills.type = 'debit' )
+                        ) ";
+                }
+
+
+                $static->whereRaw(DB::raw($query));
+            }
+
+            if (isset($request->payment_method) && $request->payment_method) {
+                $static->where('pay_bills.method', $request->payment_method);
+            }
+
+            $location_id = $request->location_id;
+            if ($location_id != 'all') {
+                $static->where('pay_bills.location_id', $location_id);
+            }
+
+            //Add condition for created_by,used in sales representative sales report
+            if (request()->has('created_by')) {
+                $created_by = request()->get('created_by');
+                if (!empty($created_by)) {
+                    $static->where('pay_bills.created_by', $created_by);
+                }
+            }
+
+            if (!empty(request()->customer_id)) {
+                $customer_id = request()->customer_id;
+                $static->where('pay_bills.contact_id', $customer_id);
+            }
+
+            $start_date = Carbon::now()->startOfMonth();
+            $end_date = Carbon::now()->endOfMonth();
+
+            if (!empty($request->start_date)) {
+                $start_date = $request->start_date;
+            }
+
+            if (!empty($request->end_date)) {
+                $end_date = $request->end_date;
+            }
+
+            $static->whereDate('pay_bills.created_at', '>=', $start_date)
+                ->whereDate('pay_bills.created_at', '<=', $end_date);
+
+            $status = request()->status;
+
+            if (!empty($status)) {
+                $static->where('pay_bills.status', $status);
+            }
+
+            return $this->respondSuccess($data, null, ["summary" => $static->get()]);
         } catch (\Exception $e) {
 //            dd($e);
             $message = $e->getMessage();

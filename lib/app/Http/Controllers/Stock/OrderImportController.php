@@ -13,6 +13,7 @@ use App\Helpers\Activity;
 use App\Http\Controllers\Controller;
 use App\InvoiceScheme;
 use App\Product;
+use App\ProductSerial;
 use App\PurchaseLine;
 use App\SellingPriceGroup;
 use App\Stock;
@@ -105,7 +106,6 @@ class OrderImportController extends Controller
                     $purchase->where('transactions.created_by', $created_by);
                 }
             }
-
 
             $contact_id = request()->get('contact_id');
             if (!empty($contact_id)) {
@@ -251,16 +251,15 @@ class OrderImportController extends Controller
             $purchase = Transaction::where('business_id', $business_id)
                 ->where('id', $id)
                 ->with(
-                    'contact:id,contact_id,first_name,name,mobile,email,type,address_line_1,created_at',
+                    'contact',
                     'stock:id,stock_name,stock_type,location_id',
                     'stock.location:id,name,landmark',
                     'purchase_lines',
-                    'purchase_lines.product:id,sku,name,contact_id,unit_id',
+                    'purchase_lines.product:id,sku,barcode,name,contact_id,unit_id,enable_sr_no',
                     'purchase_lines.product.contact:id,name',
                     'purchase_lines.product.unit:id,actual_name',
-                    'purchase_lines.product.stock_products',
-                    'purchase_lines.variations',
-                    'purchase_lines.variations.product_variation',
+                    'purchase_lines.product.stock_products:id,product_id,stock_id,purchase_price,unit_price,quantity,status',
+                    'purchase_lines.product.product_serial:id,purchase_line_id,product_id,serial,is_sell',
                     'purchase_lines.sub_unit',
                     'location:id,name,landmark,mobile',
                     'payment_lines',
@@ -389,7 +388,9 @@ class OrderImportController extends Controller
             }
 
             $products = $request->products;
+            $serial_scans = $request->serial_scans;
             $quantity_confirm = 0;
+            $totalQty = 0;
 
             foreach ($products as $product) {
                 $data = [
@@ -397,7 +398,8 @@ class OrderImportController extends Controller
                     'quantity_adjusted' => $product["quantity_adjusted"]
                 ];
 
-                $quantity_confirm += $product["quantity_adjusted"];
+                $quantity_confirm += $product["quantity_sold"];
+                $totalQty += $product["quantity"];
 
                 $result = PurchaseLine::where('id', $product["purchase_id"])
                     ->update($data);
@@ -408,9 +410,25 @@ class OrderImportController extends Controller
 
                     return $this->respondWithError($message, [], 500);
                 }
+
+                $isRedirect = $request->isRedirect;
+                $stock_id = $request->stock_id;
+
+                if (isset($isRedirect) && $isRedirect === true && !empty($stock_id)) {
+                    $stock = StockProduct::where('stock_id', $stock_id)
+                        ->where('product_id', $product["id"])
+                        ->increment('quantity', $product["quantity_sold"]);
+
+                    if (!$stock) {
+                        DB::rollBack();
+                        $message = "Lỗi trong quá trình cập nhật số lượng sản phẩm";
+
+                        return $this->respondWithError($message, [], 500);
+                    }
+                }
             }
 
-            if ($quantity_confirm === 0) {
+            if ($quantity_confirm === $totalQty) {
                 $transaction->res_order_status = "enough";
             } else {
                 $transaction->res_order_status = "deficient";
@@ -429,6 +447,46 @@ class OrderImportController extends Controller
             $transaction->tax_amount = $invoice_total['tax'];
 
             $transaction->receipt_status = "request";
+
+            if (isset($serial_scans) && count($serial_scans) > 0) {
+                $data_insert = [];
+                foreach ($serial_scans as $item) {
+                    $product_id = isset($item['product_id']) ? $item['product_id'] : null;
+                    $purchase_id = isset($item['purchase_id']) ? $item['purchase_id'] : null;
+                    $scans = isset($item['items']) ? $item['items'] : [];
+                    foreach ($scans as $scan) {
+                        if (!empty($scan['is_new']) && $scan['is_new'] === true) {
+                            $dataInsert = [
+                                "product_id" => $product_id,
+                                "purchase_line_id" => $purchase_id,
+                                "serial" => isset($scan['serial']) ? $scan['serial'] : [],
+                                'created_at' => now(),
+                            ];
+
+                            array_push($data_insert, $dataInsert);
+                        }
+
+                        if (!empty($scan['is_remove']) && $scan['is_remove'] === true) {
+                            $variationResult = ProductSerial::where("id", $scan["id"])
+                                ->delete();
+
+                            if (!$variationResult) {
+                                $message = "Không thể lưu dữ liệu";
+                                return $this->respondWithError($message, [], 503);
+                            }
+                        }
+                    }
+                }
+
+                $result = ProductSerial::insert($data_insert);
+
+                if (!$result) {
+                    DB::rollBack();
+                    $message = "Lỗi trong quá trình cập nhật số lượng sản phẩm";
+
+                    return $this->respondWithError($message, [], 500);
+                }
+            }
 
             $transaction->save();
 

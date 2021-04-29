@@ -54,6 +54,11 @@ class Product extends Model
         return $image_path;
     }
 
+    public function product_serial()
+    {
+        return $this->hasMany(\App\ProductSerial::class);
+    }
+
     public function product_variations()
     {
         return $this->hasMany(\App\ProductVariation::class);

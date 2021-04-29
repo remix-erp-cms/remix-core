@@ -13,6 +13,7 @@ use App\Events\TransactionPaymentUpdated;
 use App\Exceptions\PurchaseSellMismatch;
 use App\InvoiceScheme;
 use App\Product;
+use App\ProductSerial;
 use App\PurchaseLine;
 use App\Restaurant\ResTable;
 use App\StockProduct;
@@ -281,14 +282,18 @@ class TransactionUtil extends Util
                 $products_modified_combo[] = $product;
 
                 //calculate unit price and unit price before discount
-                $uf_unit_price = !empty($product['unit_price']) ? $product['unit_price'] : 0;
-                $unit_price_before_discount = $uf_unit_price / $multiplier;
-                $unit_price = $unit_price_before_discount;
+                $unit_price = !empty($product['unit_price']) ? $product['unit_price'] : 0;
+                $unit_price_before_discount = !empty($product['unit_price_inc_tax']) ? $product['unit_price_inc_tax'] : 0;
+                $uf_unit_price_inc_tax = !empty($product['unit_price_inc_tax']) ? $product['unit_price_inc_tax'] : 0;
+
+                $uf_quantity = !empty($product['quantity']) ? $product['quantity'] : 0;
+                $uf_item_tax = !empty($product['item_tax']) ? $product['item_tax'] : 0;
 
                 $purchase_price = !empty($product['purchase_price']) ? $product['purchase_price'] : 0;
+                $discount_amount = !empty($product['line_discount_amount']) ? $uf_data ? $this->num_uf($product['line_discount_amount']) : $product['line_discount_amount'] : 0;
+                $total_discount = 0;
 
                 if (!empty($product['line_discount_type']) && $product['line_discount_amount']) {
-                    $discount_amount = $uf_data ? $this->num_uf($product['line_discount_amount']) : $product['line_discount_amount'];
                     if ($product['line_discount_type'] == 'fixed') {
 
                         //Note: Consider multiplier for fixed discount amount
@@ -298,9 +303,14 @@ class TransactionUtil extends Util
                     }
                 }
 
-                $uf_quantity = !empty($product['quantity']) ? $product['quantity'] : 0;
-                $uf_item_tax = !empty($product['item_tax']) ? $product['item_tax'] : 0;
-                $uf_unit_price_inc_tax = !empty($product['unit_price_inc_tax']) ? $product['unit_price_inc_tax'] : 0;
+                if ($unit_price < $unit_price_before_discount) {
+                    $radio = $unit_price_before_discount - $unit_price;
+
+                    $discount_amount = ($radio / $unit_price_before_discount) * 100;
+
+                    $total_discount = $radio * $uf_quantity;
+                }
+
 
                 $res_order_status = "waiting_confirm";
                 $qty_defi = 0;
@@ -329,27 +339,52 @@ class TransactionUtil extends Util
                         StockProduct::where('stock_id', $stock_id)
                             ->where('product_id', $product['product_id'])
                             ->increment('quantity', $uf_quantity * -1);
+
+                        $serial = isset($product['serial']) ? $product['serial'] : null;
+
+                        if ($serial) {
+                            $productSerial = ProductSerial::where('product_id', $product['product_id'])
+                                ->where('serial', $serial)
+                                ->where('is_sell', 0)
+                                ->first();
+
+                            if (empty($productSerial->id)) {
+                                return false;
+                            }
+
+                            $productSerial->is_sell = 1;
+                            $productSerial->transaction_id = $transaction->id;
+                            if (!empty($product["warranty"])) {
+                                $productSerial->warranty = $product["warranty"];
+                            }
+
+                            $productSerial->save();
+                        }
                     }
                 }
 
                 $profit = ($unit_price - $purchase_price) * $uf_quantity;
+                $total = $unit_price * $uf_quantity;
 
                 $line = [
                     'product_id' => $product['product_id'],
                     'variation_id' => !empty($product['variation_id']) ? $product['variation_id'] : null,
                     'stock_product_id' => $stock_product_id,
-                    'quantity' => $uf_quantity * $multiplier,
+                    'quantity' => $uf_quantity,
                     'quantity_sold' => 0,
                     'unit_price_before_discount' => $unit_price_before_discount,
                     'unit_price' => $unit_price,
                     'purchase_price' => $purchase_price,
                     'profit' => $profit,
+                    'total' => $total,
+                    'total_discount' => $total_discount,
+                    'serial' => !empty($product['serial']) ? $product['serial'] : 0,
                     'warranty' => !empty($product['warranty']) ? $product['warranty'] : 0,
                     'line_discount_type' => !empty($product['line_discount_type']) ? $product['line_discount_type'] : null,
-                    'line_discount_amount' => !empty($product['line_discount_amount']) ? $uf_data ? $this->num_uf($product['line_discount_amount']) : $product['line_discount_amount'] : 0,
-                    'item_tax' => $uf_item_tax / $multiplier,
+                    'line_discount_amount' => $discount_amount,
+                    'item_tax' => $uf_item_tax,
                     'tax_id' => !empty($product['tax_id']) ? $product['tax_id'] : null,
-                    'unit_price_inc_tax' => $uf_unit_price_inc_tax / $multiplier,
+                    'unit_price_inc_tax' => $uf_unit_price_inc_tax,
                     'sell_line_note' => !empty($product['sell_line_note']) ? $product['sell_line_note'] : '',
                     'sub_unit_id' => !empty($product['sub_unit_id']) ? $product['sub_unit_id'] : null,
                     'discount_id' => !empty($product['discount_id']) ? $product['discount_id'] : null,
@@ -359,7 +394,7 @@ class TransactionUtil extends Util
                 ];
 
                 if ($isDirect === true) {
-                    $line["quantity_sold"] = $uf_quantity * $multiplier;
+                    $line["quantity_sold"] = $uf_quantity;
                 }
 
                 foreach ($extra_line_parameters as $key => $value) {
@@ -4261,6 +4296,7 @@ class TransactionUtil extends Util
                 'transactions.id',
                 'transactions.document',
                 'transactions.transaction_date',
+                'transactions.invoice_no',
                 'transactions.ref_no',
                 'contacts.name',
                 'transactions.status',

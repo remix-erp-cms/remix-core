@@ -656,13 +656,8 @@ class ProductUtil extends Util
             $purchase_price = $this->num_uf($product['purchase_price']);
             $quantity = $this->num_uf($product['quantity']);
 
-            if ($modifier_price === true) {
-                $output['total_before_tax'] += $this->num_uf($product['unit_price']) * $quantity;
-                $output['profit_total'] += 0;
-            } else {
-                $output['total_before_tax'] += $this->num_uf($product['unit_price_inc_tax']) * $quantity;
-                $output['profit_total'] += (($unit_price - $purchase_price) * $quantity);
-            }
+            $output['total_before_tax'] += $unit_price * $quantity;
+            $output['profit_total'] += (($unit_price - $purchase_price) * $quantity);
 
         }
 
@@ -681,7 +676,7 @@ class ProductUtil extends Util
             $tax_details = TaxRate::find($tax_id);
             if (!empty($tax_details)) {
                 $output['tax_id'] = $tax_id;
-                $output['tax'] = ($tax_details->amount / 100) * ($output['total_before_tax'] - $output['discount']);
+                $output['tax'] = ($tax_details->amount / 100) * ($output['total_before_tax']);
             }
         }
 
@@ -759,7 +754,7 @@ class ProductUtil extends Util
             $tax_details = TaxRate::find($tax_id);
             if (!empty($tax_details)) {
                 $output['tax_id'] = $tax_id;
-                $output['tax'] = ($tax_details->amount / 100) * ($output['total_before_tax'] - $output['discount']);
+                $output['tax'] = ($tax_details->amount / 100) * ($output['total_before_tax']);
             }
         }
 
@@ -808,7 +803,7 @@ class ProductUtil extends Util
             $tax_details = TaxRate::find($tax_id);
             if (!empty($tax_details)) {
                 $output['tax_id'] = $tax_id;
-                $output['tax'] = ($tax_details->amount / 100) * ($output['total_before_tax'] - $output['discount']);
+                $output['tax'] = ($tax_details->amount / 100) * ($output['total_before_tax']);
             }
         }
 
@@ -1319,7 +1314,8 @@ class ProductUtil extends Util
         $enable_product_editing = false,
         $before_status = null,
         $stock_id = null,
-        $isRedirect = false
+        $isRedirect = false,
+        $isChild = false
     )
     {
         $updated_purchase_lines = [];
@@ -1335,9 +1331,9 @@ class ProductUtil extends Util
                 $unit = Unit::find($data['sub_unit_id']);
                 $multiplier = !empty($unit->base_unit_multiplier) ? $unit->base_unit_multiplier : 1;
             }
-            $new_quantity = $this->num_uf($data['quantity']) * $multiplier;
+            $new_quantity = $data['quantity'] * $multiplier;
 
-            $new_quantity_f = $this->num_f($new_quantity);
+            $new_quantity_f = $new_quantity;
             //update existing purchase line
 
             if (isset($data['purchase_line_id'])) {
@@ -1350,6 +1346,12 @@ class ProductUtil extends Util
             } else {
                 //create newly added purchase lines
                 $purchase_line = new PurchaseLine();
+                if (isset($transaction->parent->id) && $transaction->parent->id) {
+                    $purchase_line->transaction_id = $transaction->parent->id;
+                    $purchase_line->sub_transaction_id = $transaction->id;
+                } else {
+                    $purchase_line->transaction_id = $transaction->id;
+                }
 
                 if (isset($data['product_id']) && $data['product_id']) {
                     $purchase_line->product_id = $data['product_id'];
@@ -1359,17 +1361,17 @@ class ProductUtil extends Util
 //                    $purchase_line->variation_id = $data['variation_id'];
 //                }
 
-                $purchase_line->transaction_id = $transaction->id;
-
                 //Increase quantity only if status is received
                 if ($isRedirect == true && $stock_id) {
                     StockProduct::where('stock_id', $stock_id)
                         ->where('product_id', $data['product_id'])
                         ->increment('quantity', $new_quantity_f);
                 }
+
             }
 
             $purchase_line->quantity = $new_quantity;
+
             if (isset($data['pp_without_discount'])) {
                 $purchase_line->pp_without_discount = ($this->num_uf($data['pp_without_discount'], $currency_details) * $exchange_rate) / $multiplier;
             }
@@ -1388,41 +1390,24 @@ class ProductUtil extends Util
             if (isset($data['purchase_line_tax_id'])) {
                 $purchase_line->tax_id = $data['purchase_line_tax_id'];
             }
+
+            $purchase_line->total = $new_quantity * $purchase_line->purchase_price;
+
             $purchase_line->lot_number = !empty($data['lot_number']) ? $data['lot_number'] : null;
             $purchase_line->mfg_date = !empty($data['mfg_date']) ? $this->uf_date($data['mfg_date']) : null;
             $purchase_line->exp_date = !empty($data['exp_date']) ? $this->uf_date($data['exp_date']) : null;
             $purchase_line->sub_unit_id = !empty($data['sub_unit_id']) ? $data['sub_unit_id'] : null;
 
             $updated_purchase_lines[] = $purchase_line;
-
         }
 
-        //unset deleted purchase lines
-        $delete_purchase_line_ids = [];
-        $delete_purchase_lines = null;
-
-        if (!empty($updated_purchase_line_ids)) {
-            $delete_purchase_lines = PurchaseLine::where('transaction_id', $transaction->id)
-                ->whereNotIn('id', $updated_purchase_line_ids)
-                ->get();
-
-            if ($delete_purchase_lines->count()) {
-                foreach ($delete_purchase_lines as $delete_purchase_line) {
-                    $delete_purchase_line_ids[] = $delete_purchase_line->id;
-                }
-                //Delete deleted purchase lines
-                PurchaseLine::where('transaction_id', $transaction->id)
-                    ->whereIn('id', $delete_purchase_line_ids)
-                    ->delete();
-            }
-        }
 
         //update purchase lines
         if (!empty($updated_purchase_lines)) {
             $transaction->purchase_lines()->saveMany($updated_purchase_lines);
         }
 
-        return $delete_purchase_lines;
+        return $updated_purchase_lines;
     }
 
     /**
