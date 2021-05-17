@@ -190,6 +190,10 @@ class OrderController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
+            if ($request->created_by) {
+                $user_id = $request->created_by;
+            }
+
             $transaction_data = $request->only([
                 'sub_type',
                 'status',

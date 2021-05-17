@@ -48,7 +48,13 @@ class AjaxController extends Controller
                 $options->where('options.auto_load', $request->auto_load);
             }
 
-            $options->select();
+            if ($request->sort == true) {
+                $options->orderBy('name', "asc");
+                $options->orderBy('amount', "asc");
+                $options->orderBy('sub_type', "asc");
+            }
+
+            $options->orderBy('created_at', "desc");
 
             $data = $options->paginate($request->limit);
 
@@ -77,12 +83,18 @@ class AjaxController extends Controller
                         'name' => $menu->name,
                         'value' => isset($menu->value) ? $menu->value : null,
                         'amount' => isset($menu->amount) ? $menu->amount : null,
-                        'images' => isset($menu->images) ? $menu->images : null,
+                        'description' => isset($menu->description) ? $menu->description : null,
                         'type' => $menu->type,
                         'sub_type' => isset($menu->sub_type) ? $menu->sub_type : null,
+                        'auto_load' => isset($menu->auto_load) ? $menu->auto_load : 0,
                         "business_id" => $business_id,
                         "created_by" => $user_id,
                     ];
+
+                    if (isset($input['images'])) {
+                        $urlImage = !empty($input["images"]) ? str_replace(url("/"), "", $input["images"]) : "";
+                        $input['images'] = $urlImage;
+                    }
 
                     $checkMenu = Option::where('name', $menu->name)
                         ->where("type", $menu->type)
@@ -98,6 +110,11 @@ class AjaxController extends Controller
                             return $this->respondWithError($message, [], 503);
                         }
                     } else {
+                        if (isset($inputData['images'])) {
+                            $urlImage = !empty($inputData["images"]) ? str_replace(url("/"), "", $inputData["images"]) : "";
+                            $inputData['images'] = $urlImage;
+                        }
+
                         $result = Option::create($inputData);
 
                         if (!$result) {
@@ -110,9 +127,13 @@ class AjaxController extends Controller
 
             } else {
                 $input = $request->only(['name', 'amount', 'value', 'images', 'auto_load', 'type', 'sub_type']);
-
                 $input['business_id'] = $business_id;
                 $input['created_by'] = $user_id;
+
+                if (isset($input['images'])) {
+                    $urlImage = !empty($input["images"]) ? str_replace(url("/"), "", $input["images"]) : "";
+                    $input['images'] = $urlImage;
+                }
 
                 $result = Option::create($input);
 
@@ -175,6 +196,12 @@ class AjaxController extends Controller
             if (isset($input['images'])) {
                 $options->images = $input['images'];
             }
+
+            if (isset($input['images'])) {
+                $urlImage = !empty($input["images"]) ? str_replace(url("/"), "", $input["images"]) : "";
+                $options->images = $urlImage;
+            }
+
             if (isset($input['auto_load'])) {
                 $options->auto_load = $input['auto_load'];
             }
@@ -183,7 +210,7 @@ class AjaxController extends Controller
             }
 
             if (isset($input['sub_type'])) {
-                $options->type = $input['sub_type'];
+                $options->sub_type = $input['sub_type'];
             }
 
             $result = $options->save();

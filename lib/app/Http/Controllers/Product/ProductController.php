@@ -81,11 +81,16 @@ class ProductController extends Controller
             $user_id = Auth::guard('api')->user()->id;
             $contact_id = $request->contact_id;
             $showAll = $request->showAll;
-
+            $type = $request->type;
 
             if ($showAll == "false" && !empty($contact_id)) {
-                $data = $this->getListProductByContact($request, $business_id, $contact_id);
-                return $this->respondSuccess($data);
+                if ($type === "purchase") {
+                    $data = $this->getListAllProduct($request, $business_id, $contact_id);
+                    return $this->respondSuccess($data);
+                } else {
+                    $data = $this->getListProductByContact($request, $business_id, $contact_id);
+                    return $this->respondSuccess($data);
+                }
             }
 
             $data = $this->getListAllProduct($request, $business_id);
@@ -115,8 +120,8 @@ class ProductController extends Controller
             ->groupBy('transaction_sell_lines.product_id');
 
         $products = Product::leftJoinSub($latestTransactionLines, 'tsl2', function ($join) {
-                $join->on('products.id', '=', 'tsl2.product_id');
-            })
+            $join->on('products.id', '=', 'tsl2.product_id');
+        })
             ->leftJoin(
                 'transaction_sell_lines as tsl',
                 'tsl.id',
@@ -229,7 +234,8 @@ class ProductController extends Controller
         return $data;
     }
 
-    private function getListAllProduct($request, $business_id)
+
+    private function getListAllProduct($request, $business_id, $contact_id = null)
     {
         $query = Product::where('products.business_id', $business_id)
             ->with([
@@ -242,6 +248,9 @@ class ProductController extends Controller
                 "warranty"
             ])
             ->where('products.type', '!=', 'modifier');
+        if (!empty($contact_id)) {
+            $query->where("contact_id", $contact_id);
+}
 
         $products = $query->select(
             'products.id',
@@ -302,7 +311,7 @@ class ProductController extends Controller
         }
 
         $contact_id = request()->get('contact_id', null);
-        if (!empty($contact_id) && (empty($request->showAll) || $request->showAll != "true" )) {
+        if (!empty($contact_id) && (empty($request->showAll) || $request->showAll != "true")) {
             $products->where('products.contact_id', $contact_id);
         }
 
@@ -883,9 +892,9 @@ class ProductController extends Controller
                             'sell_price_inc_tax' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
                             'updated_at' => now(),
                         ];
-						
-						
-							return $this->respondWithError($urlImage, [], 500);
+
+
+                        return $this->respondWithError($urlImage, [], 500);
 
                         if (isset($item["is_remove"]) && $item["is_remove"] === true) {
                             $variationResult = Variation::where("product_id", $product->id)
@@ -1140,8 +1149,8 @@ class ProductController extends Controller
 
                 foreach ($imported_data as $key => $value) {
                     //Check if any column is missing
-                    if (count($value) < 8 ) {
-                        $is_valid =  false;
+                    if (count($value) < 8) {
+                        $is_valid = false;
                         $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
                         break;
                     }
@@ -1158,7 +1167,7 @@ class ProductController extends Controller
                     if (!empty($product_name)) {
                         $product_array['name'] = $product_name;
                     } else {
-                        $is_valid =  false;
+                        $is_valid = false;
                         $error_msg = "Tên sản phẩm không được tìm thấy ở hàng thứ. $row_no";
                         break;
                     }
@@ -1179,7 +1188,7 @@ class ProductController extends Controller
                             break;
                         }
                     } else {
-                        $is_valid =  false;
+                        $is_valid = false;
                         $error_msg = "Đơn vị không được tìm thấy ở hàng thứ . $row_no";
                         break;
                     }
@@ -1200,7 +1209,7 @@ class ProductController extends Controller
                             break;
                         }
                     } else {
-                        $is_valid =  false;
+                        $is_valid = false;
                         $error_msg = "Nhà cung cấp không được tìm thấy ở hàng thứ. $row_no";
                         break;
                     }
@@ -1233,7 +1242,7 @@ class ProductController extends Controller
 
                     $formated_data[] = $product_array;
                     $prices_data[] = [
-                        "sell_price"=> $sell_price,
+                        "sell_price" => $sell_price,
                         "purchase_price" => $purchase_price,
                         "quantity" => $quantity
                     ];

@@ -139,7 +139,7 @@ class BusinessLocation extends Model
                                     ->join('product_locations as pl', 'pl.product_id', '=', 'variations.product_id')
                                     ->join('products as p', 'p.id', '=', 'variations.product_id')
                                     ->where('p.not_for_selling', 0)
-                                    ->with(['product_variation', 'product', 'media'])
+                                    ->with(['product_variation', 'product'])
                                     ->select('variations.*');
 
         if ($check_location) {

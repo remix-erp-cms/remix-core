@@ -53,7 +53,7 @@ class DocumentAndNoteController extends Controller
                         });
                 })
                 ->where('notable_type', $notable_type)
-                ->with('createdBy', 'media')
+                ->with('createdBy')
                 ->select('*');
 
             $permissions = $this->__getPermission($business_id, $notable_id, $notable_type);
@@ -274,7 +274,7 @@ class DocumentAndNoteController extends Controller
         $document_note = DocumentAndNote::where('business_id', $business_id)
             ->where('notable_id', $notable_id)
             ->where('notable_type', $notable_type)
-            ->with('media', 'createdBy')
+            ->with('createdBy')
             ->findOrFail($id);
 
         return view('documents_and_notes.show')

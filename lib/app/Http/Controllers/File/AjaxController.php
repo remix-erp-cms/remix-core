@@ -7,6 +7,7 @@ use App\BusinessLocation;
 use App\Contact;
 use App\CustomerGroup;
 use App\Http\Controllers\Controller;
+use App\Media;
 use App\Notifications\CustomerNotification;
 use App\PurchaseLine;
 use App\System;
@@ -61,13 +62,16 @@ class AjaxController extends Controller
         try {
             // $business_id = Auth::guard('api')->user()->business_id;
             // $user_id = Auth::guard('api')->user()->id;
-            $user_id = 1;
+//            $business_id = Auth::guard('api')->user()->business_id;
+//            $user_id = Auth::guard('api')->user()->id;
 
             $input = $request->only([
                 'app_id',
                 'upload_time',
                 'secure_code',
                 'file',
+                'title',
+                'description'
             ]);
 
 
@@ -78,12 +82,12 @@ class AjaxController extends Controller
                 'secure_code' => 'required',
             ]);
 
-            // if ($input["app_id"] !== 2) {
-            //     DB::rollBack();
-            //     $message = "Tải file lên không thành công! Thiết bị bị từ chối";
+             if ($request->app_id != 2) {
+                 DB::rollBack();
+                 $message = "Tải file lên không thành công! Thiết bị bị từ chối";
 
-            //     return $this->respondWithError($message, [], 500);
-            // }
+                 return $this->respondWithError($message, [], 500);
+             }
 
             $file = $request->file('file');
 
@@ -94,12 +98,6 @@ class AjaxController extends Controller
 
                 return $this->respondWithError($message, [], 500);
             }
-
-            $data_file_1 = (object)[
-                'location_id' => 1,
-                'business_id' => 1,
-                'created_by' => 1
-            ];
 
             $uploadFile_1 = Util::UploadResource($file);
 
@@ -114,6 +112,17 @@ class AjaxController extends Controller
             if (isset($uploadFile_1['thumb']) && $uploadFile_1['thumb']) {
                 $res['thumb'] = url($uploadFile_1['thumb']);
             }
+
+            $dataUpdate = [
+                'path' => $uploadFile_1['path'],
+                'thumb' => $uploadFile_1['thumb'],
+                'file_name' =>  $uploadFile_1['file_name'],
+                'title' => $request->title,
+                'description' => $request->description,
+                'type' => $request->type,
+            ];
+
+            Media::create($dataUpdate);
 
             DB::commit();
             return $this->respondSuccess($res);

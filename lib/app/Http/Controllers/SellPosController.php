@@ -1683,7 +1683,6 @@ class SellPosController extends Controller
                 'variations.default_sell_price as selling_price',
                 'variations.sub_sku'
             )
-            ->with(['media'])
             ->orderBy('p.name', 'asc')
             ->paginate(50);
 

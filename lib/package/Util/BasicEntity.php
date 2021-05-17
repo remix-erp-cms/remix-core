@@ -1,7 +1,6 @@
 <?php
 namespace Package\Util;
 
-use App\Model\Gallery;
 use Exception;
 use Illuminate\Support\Facades\File;
 

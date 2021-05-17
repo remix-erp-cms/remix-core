@@ -14,10 +14,25 @@ use Illuminate\Http\Request;
 */
 
 Route::group(['middleware' => ['cors', 'json.response']], function () {
+    Route::get('info', function () {
+        phpinfo();
+    });
+    Route::get('/database/test', function () {
+        $mysqli = new mysqli("localhost:3306", "erp_admin", "0123Admin@", "pna_erp");
+
+        // Check connection
+        if ($mysqli->connect_errno) {
+            echo "Failed to connect to MySQL: " . env('DB_DATABASE', 'default') . $mysqli->connect_error;
+            exit();
+        }
+
+        echo "connect to database successfully!!!!" . env('DB_DATABASE');
+    });
+
     Route::post('/device/init', function () {
         $response = [
             'success' => true,
-            'msg' => "",
+            'msg' => env('DB_DATABASE'),
             'data' => [
                 "agent" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36",
                 "created_at" => "2020-11-18 05:06:41",
@@ -498,9 +513,13 @@ Route::middleware([])->group(function () {
     // common
     Route::group(['namespace' => 'Common'], function () {
         // customer
-        Route::get('/locations', 'CommonController@locations')->name('api.common.locations');
+        Route::get('/locations', 'BussinessLocationController@list')->name('api.common.locations');
+        Route::get('locations/{id}', 'BussinessLocationController@detail')->name('api.common.locations.detail');
+        Route::post('locations/', 'BussinessLocationController@create')->name('api.common.locations.post');
+        Route::put('locations/{id}', 'BussinessLocationController@update')->name('api.common.locations.update');
+        Route::delete('locations/{id}', 'BussinessLocationController@delete')->name('api.common.locations.delete');
     });
-        // options
+    // options
     Route::group(['prefix' => 'options', 'namespace' => 'Options'], function () {
         // customer
         Route::get('/', 'AjaxController@list')->name('api.options.list');
@@ -558,12 +577,50 @@ Route::middleware([])->group(function () {
             ->name('api.menu.delete');
     });
 
+    // User
+    Route::group(['namespace' => 'User', 'prefix' => 'user' ], function () {
+        // role
+        Route::get('/role/list', 'RoleController@list')
+            ->name('api.role.list');
+        Route::get('/role/detail/{id}', 'RoleController@detail')
+            ->name('api.role.detail');
+        Route::post('/role', 'RoleController@create')
+            ->name('api.role.post');
+        Route::put('/role/update/{id}', 'RoleController@update')
+            ->name('api.role.update');
+        Route::delete('/role/{id}', 'RoleController@delete')
+            ->name('api.role.delete');
 
-    Route::get('/test', function () {
-        $response = [
-            'user' => "hello",
-            'token' => "token"
-        ];
-        return response($response, 200);
-    });
+        // permission
+        Route::get('/permission/list', 'PermissionController@list')
+            ->name('api.permission.list');
+        Route::get('/permission/detail/{id}', 'PermissionController@detail')
+            ->name('api.permission.detail');
+        Route::post('/permission', 'PermissionController@create')
+            ->name('api.permission.post');
+        Route::put('/permission/update/{id}', 'PermissionController@update')
+            ->name('api.permission.update');
+        Route::delete('/permission/{id}', 'PermissionController@delete')
+            ->name('api.permission.delete');
+
+        // profile
+        Route::get('/profile/list', 'ProfileController@list')
+            ->name('api.profile.list');
+        Route::get('/profile/detail/{id}', 'ProfileController@detail')
+            ->name('api.profile.detail');
+        Route::post('/profile', 'ProfileController@create')
+            ->name('api.profile.post');
+        Route::put('/profile/update/{id}', 'ProfileController@update')
+            ->name('api.profile.update');
+        Route::delete('/profile/{id}', 'ProfileController@delete')
+            ->name('api.profile.delete');
+});
+
+Route::get('/test', function () {
+    $response = [
+        'user' => "hello",
+        'token' => "token"
+    ];
+    return response($response, 200);
+});
 });

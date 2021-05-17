@@ -8,6 +8,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 use Illuminate\Support\Facades\Hash;
+use Spatie\Permission\Models\Role;
 use Spatie\Permission\Traits\HasRoles;
 use Laravel\Passport\HasApiTokens;
 
@@ -253,10 +254,5 @@ class User extends Authenticatable
         $role_name_array = $this->getRoleNames();
         $role_name = !empty($role_name_array[0]) ? explode('#', $role_name_array[0])[0] : '';
         return $role_name;
-    }
-
-    public function media()
-    {
-        return $this->morphOne(\App\Media::class, 'model');
     }
 }

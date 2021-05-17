@@ -44,7 +44,7 @@ class UserController extends Controller
     public function getProfile()
     {
         $user_id = request()->session()->get('user.id');
-        $user = User::where('id', $user_id)->with(['media'])->first();
+        $user = User::where('id', $user_id)->first();
         $config_languages = config('constants.langs');
         $languages = [];
         foreach ($config_languages as $key => $value) {

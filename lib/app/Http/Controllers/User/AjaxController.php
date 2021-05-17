@@ -48,8 +48,8 @@ class AjaxController extends Controller
         $user_id = Auth::guard('api')->user()->id;
         $user = User::where('id', $user_id)
             ->with([
-                'media',
-                'roles:id,name,key'
+                'roles:id,name,key',
+                'roles.permissions:id,name'
             ])
             ->select([
                 'id',

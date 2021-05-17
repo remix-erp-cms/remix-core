@@ -34,3 +34,25 @@ Route::middleware(['setData'])->group(function () {
 Route::middleware(['auth'])->group(function () {
     Route::get('/logout', 'Auth\LoginController@logout')->name('logout');
 });
+Route::get('/install/autoload', function() {
+    try {
+        exec('composer dump-autoload');
+		echo "dumpautoload successfully!!!!";
+        return Artisan::output(); //Return anything
+    } catch (\Exception $exception) {
+        echo $exception->getMessage();
+		exit;
+    }
+});
+
+Route::get('/install/clear-cache', function() {
+    try {
+        $exitCode = Artisan::call('config:clear');
+        $exitCode = Artisan::call('config:cache');
+		echo "Clear successfully!!!!";
+        return Artisan::output(); //Return anything
+    } catch (\Exception $exception) {
+        echo $exception->getMessage();
+		exit;
+    }
+});

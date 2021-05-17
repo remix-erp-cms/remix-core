@@ -21,6 +21,7 @@ class Option extends Model
      * @var array
      */
     protected $guarded = ['id'];
+    protected $appends = ['image_url'];
 
     public function business()
     {
@@ -30,5 +31,16 @@ class Option extends Model
     public function created_user()
     {
         return $this->belongsTo(\App\User::class, 'created_by');
+    }
+
+
+    public function getImageUrlAttribute()
+    {
+        if (!empty($this->images)) {
+            $image_url = asset($this->images);
+        } else {
+            $image_url = asset('/img/default.png');
+        }
+        return $image_url;
     }
 }
