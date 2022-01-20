@@ -79,49 +79,64 @@ class PriceQuoteController extends Controller
 
             $business_id = Auth::guard('api')->user()->business_id;
             $location_id = $request->location_id;
+            $user_id = Auth::guard('api')->user()->id;
             $stock_id = $request->stock_id;
 
             $purchase = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
                 'sales_person:id,first_name,user_type',
                 'accountants',
             ])
+                ->join("contacts", "contacts.id", "=", "transactions.contact_id")
+                ->join("users", "users.id", "=", "transactions.created_by")
                 ->where('transactions.type', 'price_quote')
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            if (request()->has('id')) {
-                $id = request()->get('id');
-                if (!empty($id)) {
-                    $purchase->where('transactions.id', $id);
-                }
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
             }
 
             //Add condition for created_by,used in sales representative sales report
-            if (request()->has('created_by')) {
-                $created_by = request()->get('created_by');
-                if (!empty($created_by)) {
-                    $purchase->where('transactions.created_by', $created_by);
-                }
+            $view_all = null;
+
+            if(!empty($request->view_all)) {
+                $view_all = $request->view_all;
             }
 
-            $start = Carbon::now()->startOfMonth();
-            $end = Carbon::now()->endOfMonth();
+            if(!empty($request->header('view-all'))) {
+                $view_all = $request->header('view-all');
+            }
+
+            if (empty($view_all) || $view_all != "1") {
+                $purchase->where('transactions.created_by', $user_id);
+            }
+
+            if (!empty($request->contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$request->contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
+            }
+
+            $contact_id = request()->get('contact_id');
+            if (!empty($contact_id)) {
+                $purchase->where('transactions.contact_id', $contact_id);
+            }
 
             if (!empty(request()->start_date)) {
                 $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->where('transactions.transaction_date', '>=', $start);
             }
 
             if (!empty(request()->end_date)) {
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->where('transactions.transaction_date', '<=', $end);
             }
-
-
-            $purchase->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end);
 
             $status = request()->status;
 
@@ -146,21 +161,169 @@ class PriceQuoteController extends Controller
 
             $purchase->groupBy('transactions.id');
             $purchase->orderBy('transactions.created_at', "desc");
-            $purchase->select();
+            $purchase->select("transactions.*");
 
             $data = $purchase->paginate($request->limit);
 
-            $summary = DB::table('transactions')
-                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
-                ->where('business_id', $business_id)
-                ->where('location_id', $location_id)
-                ->where('type', "price_quote")
-                ->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end)
-                ->groupBy('status')
-                ->get();
+//            $summary = DB::table('transactions')
+//                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
+//                ->where('business_id', $business_id)
+//                ->where('location_id', $location_id)
+//                ->where('type', "price_quote")
+//                ->groupBy('status');
+//
+//
+//            if (empty($view_all) || $view_all != "1") {
+//                $summary->where('transactions.created_by', $user_id);
+//            }
+//
+//            if (!empty(request()->start_date)) {
+//                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+//                $summary->where('transactions.transaction_date', '>=', $start);
+//            }
+//
+//            if (!empty(request()->end_date)) {
+//                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+//                $summary->where('transactions.transaction_date', '<=', $end);
+//            }
+//
+//            if (!empty($res_order_status) && count($res_order_status) > 0) {
+//                $summary->whereIn('transactions.res_order_status', $res_order_status);
+//            } else if (!empty($res_order_status) && $res_order_status != "all") {
+//                $summary->where('transactions.res_order_status', $res_order_status);
+//            }
 
-            return $this->respondSuccess($data, null, ["summary" => $summary]);
+            return $this->respondSuccess($data, null);
+        } catch (\Exception $e) {
+//            dd($e);
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    public function listProduct(Request $request)
+    {
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $location_id = $request->location_id;
+            $stock_id = $request->stock_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            $purchase = TransactionSellLine::leftJoin('transactions', 'transactions.id', '=', 'transaction_sell_lines.transaction_id')
+                ->leftJoin('contacts', 'contacts.id', '=', 'transactions.contact_id')
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
+                ->leftJoin('products', 'products.id', '=', 'transaction_sell_lines.product_id')
+                ->leftJoin('units', 'products.unit_id', '=', 'units.id')
+                ->leftJoin('business_locations', 'business_locations.id', '=', 'transactions.location_id')
+                ->where('transactions.location_id', $location_id)
+                ->where('transactions.business_id', $business_id)
+                ->where('transactions.type', 'price_quote')
+                ->select(
+                    'transaction_sell_lines.*',
+                    'transactions.invoice_no',
+                    'transactions.stock_id',
+                    'transactions.status',
+                    'transactions.res_order_status',
+                    'transactions.transaction_date as transaction_date',
+                    'transactions.staff_note as staff_note',
+                    'contacts.name as contact_name',
+                    'contacts.tax_number as tax_number',
+                    'products.name as product_name',
+                    'units.actual_name as unit_name',
+                    'products.sku as product_sku',
+                    'users.first_name as created_by',
+                    'business_locations.name as location_name',
+                    \DB::raw('SUM(transaction_sell_lines.unit_price * transaction_sell_lines.quantity) as final_total')
+                );
+
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
+            }
+
+            //Add condition for created_by,used in sales representative sales report
+            $view_all = null;
+
+            if(!empty($request->view_all)) {
+                $view_all = $request->view_all;
+            }
+
+            if(!empty($request->header('view-all'))) {
+                $view_all = $request->header('view-all');
+            }
+
+            if (empty($view_all) || $view_all != "1") {
+                $purchase->where('transactions.created_by', $user_id);
+                return $this->respondWithError($purchase->toSql(), [], 500);
+            }
+
+            $contact_id = request()->get('contact_id');
+            if (!empty($contact_id)) {
+                $purchase->where('transactions.contact_id', $contact_id);
+            }
+
+            $contact_name = request()->get('contact_name');
+            if (!empty($contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
+            }
+
+            $status = request()->status;
+
+            if (!empty($status) && $status != "all") {
+                $purchase->where('transactions.status', $status);
+            }
+
+            $shipping_status = request()->shipping_status;
+
+            if (!empty($shipping_status) && $shipping_status != "all") {
+                $purchase->where('transactions.shipping_status', $shipping_status);
+            }
+
+            $res_order_status = request()->res_order_status;
+
+            if (!empty($res_order_status) && $res_order_status != "all") {
+                $purchase->where('transactions.res_order_status', $res_order_status);
+            }
+
+            $receipt_status = request()->receipt_status;
+
+            if (!empty($receipt_status) && $receipt_status != "all") {
+                $purchase->where('transactions.receipt_status', $receipt_status);
+            }
+
+            if (!empty(request()->start_date)) {
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->whereDate('transactions.created_at', '>=', $start);
+            }
+
+            if (!empty(request()->end_date)) {
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->whereDate('transactions.created_at', '<=', $end);
+
+            }
+
+            $payment_status = request()->payment_status;
+
+            if (!empty($payment_status) && $payment_status != "all") {
+                $purchase->where('transactions.payment_status', $payment_status);
+            }
+
+            $shipping_status = request()->shipping_status;
+
+            if (!empty($shipping_status) && $shipping_status != "all") {
+                $purchase->where('transactions.shipping_status', $shipping_status);
+            }
+
+            $purchase->groupBy('transaction_sell_lines.id');
+            $purchase->orderBy('transaction_sell_lines.created_at', "asc");
+
+            $data = $purchase->paginate($request->limit);
+
+            return $this->respondSuccess($data, null);
         } catch (\Exception $e) {
 //            dd($e);
             $message = $e->getMessage();
@@ -181,7 +344,7 @@ class PriceQuoteController extends Controller
                     'contact',
                     'purchase_lines',
                     'purchase_lines.product:id,sku,name,contact_id,unit_id',
-                    'purchase_lines.product.contact:id,name',
+                    'purchase_lines.product.contact:id,first_name',
                     'purchase_lines.product.unit:id,actual_name',
                     'purchase_lines.variations',
                     'purchase_lines.variations.product_variation',
@@ -357,7 +520,7 @@ class PriceQuoteController extends Controller
                     'contact:id,contact_id,first_name,name,mobile,email,type,address_line_1,created_at',
                     'sell_lines',
                     'sell_lines.product:id,sku,name,contact_id,unit_id',
-                    'sell_lines.product.contact:id,name',
+                    'sell_lines.product.contact:id,first_name',
                     'sell_lines.product.unit:id,actual_name',
                     'sell_lines.variations',
                     'sell_lines.variations.product_variation',

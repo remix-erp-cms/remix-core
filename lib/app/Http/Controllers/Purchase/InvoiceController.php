@@ -200,7 +200,7 @@ class InvoiceController extends Controller
 
             $purchase_lines = PurchaseLine::with([
                 'product:id,contact_id',
-                'product.contact:id,name',
+                'product.contact:id,first_name',
             ])
                 ->where('purchase_lines.transaction_id', $transaction_id)
                 ->select([

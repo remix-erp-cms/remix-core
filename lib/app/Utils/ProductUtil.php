@@ -695,9 +695,10 @@ class ProductUtil extends Util
         $output = [
             'total_before_tax' => 0,
             'tax' => 0,
-            'discount' => 0,
+            'discount' => $discount['discount_amount'],
             'final_total' => 0,
-            'profit_total' => 0
+            'profit_total' => 0,
+            'shipping_charges' => 0
         ];
 
         //Sub Total
@@ -709,8 +710,29 @@ class ProductUtil extends Util
             $output['profit_total'] += 0;
         }
 
+        //Calculate discount
+        $discountAmount = $this->num_uf($discount['discount_amount']);
+
+        if (!empty($discount) && is_array($discount)) {
+            if ($discount['discount_type'] == 'fixed') {
+                $discountAmount = $this->num_uf($discount['discount_amount']);
+            } else {
+                $discountAmount = ($this->num_uf($discount['discount_amount']) / 100) * $output['total_before_tax'];
+            }
+        }
+
+        //Tax
+        $output['tax'] = 0;
+        if (!empty($tax_id)) {
+            $tax_details = TaxRate::find($tax_id);
+            if (!empty($tax_details)) {
+                $output['tax_id'] = $tax_id;
+                $output['tax'] = ($tax_details->amount / 100) * ($output['total_before_tax']);
+            }
+        }
+
         //Calculate total
-        $output['final_total'] = $output['total_before_tax'] + $output['tax'] - $output['discount'];
+        $output['final_total'] = $output['total_before_tax'] + $output['tax'] + $output['shipping_charges'] - $discountAmount;
 
         return $output;
     }
@@ -1336,13 +1358,15 @@ class ProductUtil extends Util
             $new_quantity_f = $new_quantity;
             //update existing purchase line
 
-            if (isset($data['purchase_line_id'])) {
-                $purchase_line = PurchaseLine::findOrFail($data['purchase_line_id']);
-                $updated_purchase_line_ids[] = $purchase_line->id;
-                $old_qty = $this->num_f($purchase_line->quantity);
+            if (isset($data['purchase_line_id']) && $data['purchase_line_id']) {
+                $purchase_line = PurchaseLine::where("id", $data['purchase_line_id'])->first();
+                if ($purchase_line) {
+                    $updated_purchase_line_ids[] = $purchase_line->id;
+                }
 
 
-                $this->updateProductStock($before_status, $transaction, $data['product_id'], $data['variation_id'], $new_quantity, $purchase_line->quantity, $currency_details);
+
+//                $this->updateProductStock($before_status, $transaction, $data['product_id'], $data['variation_id'], $new_quantity, $purchase_line->quantity, $currency_details);
             } else {
                 //create newly added purchase lines
                 $purchase_line = new PurchaseLine();
@@ -1367,7 +1391,6 @@ class ProductUtil extends Util
                         ->where('product_id', $data['product_id'])
                         ->increment('quantity', $new_quantity_f);
                 }
-
             }
 
             $purchase_line->quantity = $new_quantity;
@@ -1401,6 +1424,11 @@ class ProductUtil extends Util
             $updated_purchase_lines[] = $purchase_line;
         }
 
+        if (!empty($updated_purchase_line_ids)) {
+           PurchaseLine::where('transaction_id', $transaction->id)
+                ->whereNotIn('id', $updated_purchase_line_ids)
+                ->delete();
+        }
 
         //update purchase lines
         if (!empty($updated_purchase_lines)) {

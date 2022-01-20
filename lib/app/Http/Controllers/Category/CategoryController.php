@@ -59,8 +59,18 @@ class CategoryController extends Controller
                     ->orWhere('id', $parent_id);
             }
 
-            $category->orderBy('created_at', "desc");
-            $category->orderBy('name', "asc");
+            $sort_field = "created_at";
+            $sort_des = "desc";
+
+            if(isset($request->order_field) && $request->order_field) {
+                $sort_field = $request->order_field;
+            }
+
+            if(isset($request->order_by) && $request->order_by) {
+                $sort_des = $request->order_by;
+            }
+
+            $category->orderBy($sort_field, $sort_des);
 
             $data = $category->paginate($request->limit);
 
@@ -296,12 +306,18 @@ class CategoryController extends Controller
                 $imported_data = array_splice($parsed_array[0], 1);
 
                 $formated_data = [];
-                $prices_data = [];
 
                 $is_valid = true;
                 $error_msg = '';
+                $is_replace = false;
+                $columnReplace = [];
 
-                $total_rows = count($imported_data);
+                if(isset($request->column_select) && $request->column_select) {
+                    $columnReplace = explode(',', $request->column_select);
+                    if (count($columnReplace) > 0) {
+                        $is_replace = true;
+                    }
+                }
 
                 foreach ($imported_data as $key => $value) {
                     //Check if any column is missing
@@ -318,19 +334,15 @@ class CategoryController extends Controller
                     $category_array['category_type'] = "product";
 
 
+                    //Add id
+                    $id = trim($value[0]);
+
+                    $category_array['id'] = $id;
+
                     //Add SKU
-                    $actual_name = trim($value[0]);
+                    $actual_name = trim($value[1]);
                     if (!empty($actual_name)) {
                         $category_array['name'] = $actual_name;
-                        //Check if product with same SKU already exist
-                        $is_exist = Category::where('name', $category_array['name'])
-                            ->where('business_id', $business_id)
-                            ->exists();
-                        if ($is_exist) {
-                            $is_valid = false;
-                            $error_msg = "Tên danh mục : $actual_name đã tồn tại ở dòng thứ. $row_no";
-                            break;
-                        }
                     } else {
                         $is_valid = false;
                         $error_msg = "Thiếu tên danh mục";
@@ -338,7 +350,7 @@ class CategoryController extends Controller
                     }
 
                     //Add product name
-                    $description = trim($value[1]);
+                    $description = trim($value[2]);
                     if (!empty($description)) {
                         $category_array['description'] = $description;
                     }
@@ -351,9 +363,25 @@ class CategoryController extends Controller
                 }
 
                 if (!empty($formated_data)) {
-                    foreach ($formated_data as $index => $category_data) {
-                        //Create new product
-                        Category::create($category_data);
+
+                    foreach ($formated_data as $index => $item) {
+                        $exitItem = Category::where('id', $item['id'])
+                            ->first();
+
+                        if($exitItem && $is_replace === true) {
+                            $dataUpdate = [];
+
+                            foreach ($columnReplace as $value) {
+                                if (isset($item[$value])) {
+                                    $dataUpdate[$value] = $item[$value];
+                                }
+
+                                Category::where('id', $item['id'])
+                                    ->update($dataUpdate);
+                            }
+                        } else {
+                            Category::create($item);
+                        }
                     }
                 }
             }

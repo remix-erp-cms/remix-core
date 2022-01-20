@@ -38,10 +38,7 @@ class BussinessLocationController extends Controller
     public function list(Request $request)
     {
         try {
-            $business_id = Auth::guard('api')->user()->business_id;
-
-            $locations = BusinessLocation::where('business_id', $business_id)
-                ->select();
+            $locations = BusinessLocation::select();
 
             if (isset($request->keyword) && $request->keyword) {
                 $locations->where("name", "LIKE", "%$request->keyword%");

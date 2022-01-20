@@ -1,7 +1,6 @@
 SELECT
-	COUNT( id ) as "total_order",
-	SUM( final_total ) as "final_total",
-	SUM( final_profit ) as "final_profit"
+	payment_status,
+	SUM( final_total ) as "final_total"
 FROM
 	transactions
 	WHERE  location_id="$location_id"
@@ -9,3 +8,4 @@ FROM
 	AND type="$type"
 	AND $create_by
 	AND DATE(created_at) BETWEEN DATE("$start_date") AND DATE("$end_date")
+GROUP BY payment_status

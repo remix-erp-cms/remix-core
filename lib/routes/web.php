@@ -48,7 +48,8 @@ Route::get('/install/autoload', function() {
 Route::get('/install/clear-cache', function() {
     try {
         $exitCode = Artisan::call('config:clear');
-        $exitCode = Artisan::call('config:cache');
+        $exitCode = Artisan::call('config:cache
+        ');
 		echo "Clear successfully!!!!";
         return Artisan::output(); //Return anything
     } catch (\Exception $exception) {

@@ -79,107 +79,265 @@ class OrderController extends Controller
         try {
 
             $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
             $location_id = $request->location_id;
             $stock_id = $request->stock_id;
 
-            $saleOrder = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+            $transaction = Transaction::with([
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
                 'sales_person:id,first_name,user_type',
+                'approve_by:id,first_name,user_type',
+                'reject_by:id,first_name,user_type',
+                'pending_by:id,first_name,user_type',
+                'complete_by:id,first_name,user_type',
                 'accountants',
+                'children:id,ref_no,final_total,invoice_no,type,status'
             ])
+                ->leftJoin("contacts", "contacts.id", "=", "transactions.contact_id")
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
                 ->where('transactions.type', 'sell')
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            if (request()->has('id')) {
-                $id = request()->get('id');
-                if (!empty($id)) {
-                    $saleOrder->where('transactions.id', $id);
-                }
+
+            $view_all = null;
+
+            if(!empty($request->view_all)) {
+                $view_all = $request->view_all;
+            }
+
+            if(!empty($request->header('view-all'))) {
+                $view_all = $request->header('view-all');
+            }
+
+            if (empty($view_all) || $view_all != "1") {
+                $transaction->where('transactions.created_by', $user_id);
+            }
+
+            if (!empty($request->id)) {
+                $transaction->where('transactions.invoice_no',"LIKE", "%$request->id%");
+            }
+
+            if (!empty($request->contact_name)) {
+                $transaction->where('contacts.first_name',"LIKE", "%$request->contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $transaction->where('users.first_name',"LIKE", "%$request->employee%");
             }
 
             //Add condition for created_by,used in sales representative sales report
             if (request()->has('created_by')) {
                 $created_by = request()->get('created_by');
                 if (!empty($created_by)) {
-                    $saleOrder->where('transactions.created_by', $created_by);
+                    $transaction->where('transactions.created_by', $created_by);
                 }
             }
 
 
             $contact_id = request()->get('contact_id');
             if (!empty($contact_id)) {
-                $saleOrder->where('transactions.contact_id', $contact_id);
+                $transaction->where('transactions.contact_id', $contact_id);
             }
-
-            $start = Carbon::now()->startOfMonth();
-            $end = Carbon::now()->endOfMonth();
 
             if (!empty(request()->start_date)) {
                 $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $transaction->where('transactions.transaction_date', '>=', $start);
             }
 
             if (!empty(request()->end_date)) {
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $transaction->where('transactions.transaction_date', '<=', $end);
             }
-
-
-            $saleOrder->whereDate('transactions.created_at', '>=', $start)
-                ->whereDate('transactions.created_at', '<=', $end);
-
+            
             $status = request()->status;
 
             if (!empty($status) && $status != "all") {
-                $saleOrder->where('transactions.status', $status);
+                $transaction->where('transactions.status', $status);
             }
 
             $shipping_status = request()->shipping_status;
 
             if (!empty($shipping_status) && $shipping_status != "all") {
-                $saleOrder->where('transactions.shipping_status', $shipping_status);
+                $transaction->where('transactions.shipping_status', $shipping_status);
             }
 
             $res_order_status = request()->res_order_status;
 
-            if (!empty($res_order_status) && count($res_order_status) > 0) {
-                $saleOrder->whereIn('transactions.res_order_status', $res_order_status);
+            if (!empty($res_order_status) && is_array($res_order_status) && count($res_order_status) > 0) {
+                $transaction->whereIn('transactions.res_order_status', $res_order_status);
             } else if (!empty($res_order_status) && $res_order_status != "all") {
-                $saleOrder->where('transactions.res_order_status', $res_order_status);
+                $transaction->where('transactions.res_order_status', $res_order_status);
             }
 
             $receipt_status = request()->receipt_status;
 
             if (!empty($receipt_status) && $receipt_status != "all") {
-                $saleOrder->where('transactions.receipt_status', $receipt_status);
+                $transaction->where('transactions.receipt_status', $receipt_status);
             }
 
-            $saleOrder->addSelect('transactions.res_order_status');
+            $transaction->addSelect('transactions.res_order_status');
 
-            $saleOrder->groupBy('transactions.id');
-            $saleOrder->orderBy('transactions.created_at', "desc");
-            $saleOrder->select();
+            $transaction->groupBy('transactions.id');
+            $transaction->orderBy('transactions.created_at', "desc");
+            $transaction->select("transactions.*");
 
-            $data = $saleOrder->paginate($request->limit);
+            $data = $transaction->paginate($request->limit);
+//
+//            $summary = DB::table('transactions')
+//                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
+//                ->where('business_id', $business_id)
+//                ->where('location_id', $location_id)
+//                ->where('type', "sell")
+//                ->whereDate('transactions.transaction_date', '>=', $start)
+//                ->whereDate('transactions.transaction_date', '<=', $end)
+//                ->groupBy('status');
+//
+//            if (empty($view_all) || $view_all != "1") {
+//                $summary->where('transactions.created_by', $user_id);
+//            }
+//
+//            if (!empty($res_order_status) && count($res_order_status) > 0) {
+//                $summary->whereIn('transactions.res_order_status', $res_order_status);
+//            } else if (!empty($res_order_status) && $res_order_status != "all") {
+//                $summary->where('transactions.res_order_status', $res_order_status);
+//            }
 
-            $summary = DB::table('transactions')
-                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
-                ->where('business_id', $business_id)
-                ->where('location_id', $location_id)
-                ->where('type', "sell")
-                ->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end)
-                ->groupBy('status');
+            return $this->respondSuccess($data, null);
+        } catch (\Exception $e) {
+//            dd($e);
+            $message = $e->getMessage();
 
-            if (!empty($res_order_status) && count($res_order_status) > 0) {
-                $summary->whereIn('transactions.res_order_status', $res_order_status);
-            } else if (!empty($res_order_status) && $res_order_status != "all") {
-                $summary->where('transactions.res_order_status', $res_order_status);
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
+    public function listProduct(Request $request)
+    {
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $location_id = $request->location_id;
+            $stock_id = $request->stock_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            $purchase = TransactionSellLine::leftJoin('transactions', 'transactions.id', '=', 'transaction_sell_lines.transaction_id')
+                ->leftJoin('contacts', 'contacts.id', '=', 'transactions.contact_id')
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
+                ->leftJoin('products', 'products.id', '=', 'transaction_sell_lines.product_id')
+                ->leftJoin('units', 'products.unit_id', '=', 'units.id')
+                ->leftJoin('business_locations', 'business_locations.id', '=', 'transactions.location_id')
+                ->where('transactions.location_id', $location_id)
+                ->where('transactions.business_id', $business_id)
+                ->where('transactions.type', 'sell')
+                ->select(
+                    'transaction_sell_lines.*',
+                    'transactions.invoice_no',
+                    'transactions.stock_id',
+                    'transactions.status',
+                    'transactions.res_order_status',
+                    'transactions.transaction_date as transaction_date',
+                    'transactions.staff_note as staff_note',
+                    'contacts.name as contact_name',
+                    'contacts.tax_number as tax_number',
+                    'products.name as product_name',
+                    'units.actual_name as unit_name',
+                    'products.sku as product_sku',
+                    'users.first_name as created_by',
+                    'business_locations.name as location_name',
+                    \DB::raw('SUM(transaction_sell_lines.unit_price * transaction_sell_lines.quantity) as final_total')
+                );
+
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
             }
 
-            return $this->respondSuccess($data, null, ["summary" => $summary->get()]);
+            //Add condition for created_by,used in sales representative sales report
+            $view_all = null;
+
+            if(!empty($request->view_all)) {
+                $view_all = $request->view_all;
+            }
+
+            if(!empty($request->header('view-all'))) {
+                $view_all = $request->header('view-all');
+            }
+
+            if (empty($view_all) || $view_all != "1") {
+                $purchase->where('transactions.created_by', $user_id);
+                return $this->respondWithError($purchase->toSql(), [], 500);
+            }
+
+            $contact_id = request()->get('contact_id');
+            if (!empty($contact_id)) {
+                $purchase->where('transactions.contact_id', $contact_id);
+            }
+
+            $contact_name = request()->get('contact_name');
+            if (!empty($contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
+            }
+
+            $status = request()->status;
+
+            if (!empty($status) && $status != "all") {
+                $purchase->where('transactions.status', $status);
+            }
+
+            $shipping_status = request()->shipping_status;
+
+            if (!empty($shipping_status) && $shipping_status != "all") {
+                $purchase->where('transactions.shipping_status', $shipping_status);
+            }
+
+            $res_order_status = request()->res_order_status;
+
+            if (!empty($res_order_status) && $res_order_status != "all") {
+                $purchase->where('transactions.res_order_status', $res_order_status);
+            }
+
+            $receipt_status = request()->receipt_status;
+
+            if (!empty($receipt_status) && $receipt_status != "all") {
+                $purchase->where('transactions.receipt_status', $receipt_status);
+            }
+
+            if (!empty(request()->start_date)) {
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->whereDate('transactions.created_at', '>=', $start);
+            }
+
+            if (!empty(request()->end_date)) {
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->whereDate('transactions.created_at', '<=', $end);
+
+            }
+
+            $payment_status = request()->payment_status;
+
+            if (!empty($payment_status) && $payment_status != "all") {
+                $purchase->where('transactions.payment_status', $payment_status);
+            }
+
+            $shipping_status = request()->shipping_status;
+
+            if (!empty($shipping_status) && $shipping_status != "all") {
+                $purchase->where('transactions.shipping_status', $shipping_status);
+            }
+
+            $purchase->groupBy('transaction_sell_lines.id');
+            $purchase->orderBy('transaction_sell_lines.created_at', "asc");
+
+            $data = $purchase->paginate($request->limit);
+
+            return $this->respondSuccess($data, null);
         } catch (\Exception $e) {
 //            dd($e);
             $message = $e->getMessage();
@@ -194,7 +352,7 @@ class OrderController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $saleOrder = Transaction::where('business_id', $business_id)
+            $transaction = Transaction::where('business_id', $business_id)
                 ->where('id', $id)
                 ->with(
                     'contact:id,contact_id,first_name,name,mobile,email,type,address_line_1,created_at',
@@ -202,7 +360,7 @@ class OrderController extends Controller
                     'stock:id,stock_name,stock_type,location_id',
                     'stock.location:id,name,landmark',
                     'sell_lines.product:id,sku,barcode,name,contact_id,unit_id',
-                    'sell_lines.product.contact:id,name',
+                    'sell_lines.product.contact:id,first_name',
                     'sell_lines.product.unit:id,actual_name',
                     'sell_lines.product.stock_products',
                     'sell_lines.variations',
@@ -254,7 +412,7 @@ class OrderController extends Controller
                 ])
                 ->firstOrFail();
 
-            return $this->respondSuccess($saleOrder);
+            return $this->respondSuccess($transaction);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -418,7 +576,7 @@ class OrderController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $saleOrder = Transaction::where('business_id', $business_id)
+            $transaction = Transaction::where('business_id', $business_id)
                 ->where('id', $id)
                 ->with(
                     'contact:id,contact_id,first_name,name,mobile,email,type,address_line_1,created_at',
@@ -426,7 +584,7 @@ class OrderController extends Controller
                     'stock:id,stock_name,stock_type,location_id',
                     'stock.location:id,name,landmark',
                     'sell_lines.product:id,sku,barcode,name,contact_id,unit_id',
-                    'sell_lines.product.contact:id,name',
+                    'sell_lines.product.contact:id,first_name',
                     'sell_lines.product.unit:id,actual_name',
                     'sell_lines.product.stock_products',
                     'sell_lines.variations',
@@ -436,7 +594,8 @@ class OrderController extends Controller
                     'payment_lines',
                     'tax:id,name,amount',
                     'sales_person:id,username,first_name,last_name,contact_number,email',
-                    'delivery_company:id,name,tracking'
+                    'delivery_company:id,name,tracking',
+                    'children:id,ref_no,invoice_no,type'
                 )
                 ->select([
                     'transactions.id',
@@ -468,6 +627,7 @@ class OrderController extends Controller
                     'transactions.discount_amount',
                     'transactions.discount_type',
                     'transactions.payment_method',
+                    'transactions.final_profit',
                     'transactions.service_custom_field_1',
                     'transactions.service_custom_field_2',
                     'transactions.service_custom_field_3',
@@ -478,7 +638,7 @@ class OrderController extends Controller
                 ])
                 ->firstOrFail();
 
-            return $this->respondSuccess($saleOrder);
+            return $this->respondSuccess($transaction);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -554,7 +714,7 @@ class OrderController extends Controller
                         $transaction = Transaction::findOrFail($id);
 
                         $transaction->receipt_status = "approve";
-                        $transaction->shipping_status = "created";
+                        $transaction->complete_by = $user_id;
 
                         $result = $this->changeQuantityProduct($transaction->id, $stock_id, $user_id, $business_id);
 
@@ -694,6 +854,63 @@ class OrderController extends Controller
         }
     }
 
+    public function unapprove(Request $request, $id)
+    {
+        try {
+            if (!isset($id) || !$id) {
+                $res = [
+                    'status' => 'danger',
+                    'msg' => "Không tìm thấy đơn hàng"
+                ];
+
+                return response()->json($res, 404);
+            }
+
+            $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            $transaction = Transaction::findOrFail($id);
+
+            if (isset($transaction->ref_no) && is_numeric($transaction->ref_no)) {
+                $order = Transaction::findOrFail($transaction->ref_no);
+                if ($order && $order->id) {
+                    $order->status = "po_pending";
+                    $order->pending_by = $user_id;
+                    $order->save();
+                }
+            }
+
+            $transaction->status = "ordered";
+            $transaction->res_order_status = "";
+            $transaction->shipping_status = "";
+            $transaction->receipt_status = "";
+            $transaction->payment_status = "payment_pending";
+            $transaction->approve_by = $user_id;
+
+            $transaction->save();
+
+            $dataLog = [
+                'created_by' => $user_id,
+                'business_id' => $business_id,
+                'log_name' => "Cập nhật trạng thái cầu mua hàng",
+                'subject_id' => $id
+            ];
+
+            $message = "Chuyển trạng thái mua hàng thành đã được hủy duyệt";
+
+            Activity::history($message, "sell", $dataLog);
+
+            DB::commit();
+
+            return $this->respondSuccess($transaction);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
+
     public function reject(Request $request, $id)
     {
         try {
@@ -773,7 +990,6 @@ class OrderController extends Controller
             }
 
             $transaction->receipt_status = "approve";
-            $transaction->shipping_status = "created";
             $transaction->complete_by = $user_id;
 
             $result = $this->changeQuantityProduct($transaction->id, $stock_id, $user_id, $business_id);
@@ -1026,8 +1242,8 @@ class OrderController extends Controller
             }
             //Delete sell lines first
             $delete_purchase_line_ids = [];
-            foreach ($delete_purchase_lines as $saleOrder_line) {
-                $delete_purchase_line_ids[] = $saleOrder_line->id;
+            foreach ($delete_purchase_lines as $transaction_line) {
+                $delete_purchase_line_ids[] = $transaction_line->id;
             }
 
             PurchaseLine::where('transaction_id', $transaction->id)
@@ -1066,7 +1282,7 @@ class OrderController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $saleOrder = Transaction::where('business_id', $business_id)
+            $transaction = Transaction::where('business_id', $business_id)
                 ->where('id', $id)
                 ->with(
                     'contact',
@@ -1079,7 +1295,7 @@ class OrderController extends Controller
                 )
                 ->first();
 
-            return $this->respondSuccess($saleOrder);
+            return $this->respondSuccess($transaction);
         } catch (\Exception $e) {
             DB::rollBack();
             $message = $e->getMessage();
@@ -1091,10 +1307,10 @@ class OrderController extends Controller
     private function changeQuantityProduct($transaction_id, $stock_id, $user_id, $business_id)
     {
         try {
-            $saleOrder_line = TransactionSellLine::where('transaction_id', $transaction_id)->get();
+            $transaction_line = TransactionSellLine::where('transaction_id', $transaction_id)->get();
 
-            if ($saleOrder_line && count($saleOrder_line) > 0) {
-                foreach ($saleOrder_line as $product) {
+            if ($transaction_line && count($transaction_line) > 0) {
+                foreach ($transaction_line as $product) {
                     $stock = StockProduct::where('stock_id', $stock_id)
                         ->where('product_id', $product->product_id)
                         ->increment('quantity', $product->quantity_sold * -1);

@@ -44,14 +44,25 @@ class UnitController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
 
             $unit = Unit::where('business_id', $business_id)
-                ->with(['base_unit'])
                 ->select(['actual_name', 'short_name', 'allow_decimal', 'id',
-                    'base_unit_id', 'base_unit_multiplier'])
-                ->orderBy('created_at', "desc");
+                    'base_unit_id', 'base_unit_multiplier']);
 
             if (isset($request->keyword) && $request->keyword) {
                 $unit->where("actual_name", "LIKE", "%$request->keyword%");
             }
+
+            $sort_field = "created_at";
+            $sort_des = "desc";
+
+            if(isset($request->order_field) && $request->order_field) {
+                $sort_field = $request->order_field;
+            }
+
+            if(isset($request->order_by) && $request->order_by) {
+                $sort_des = $request->order_by;
+            }
+
+            $unit->orderBy($sort_field, $sort_des);
 
             $data = $unit->paginate($request->limit);
 
@@ -240,12 +251,18 @@ class UnitController extends Controller
                 $imported_data = array_splice($parsed_array[0], 1);
 
                 $formated_data = [];
-                $prices_data = [];
 
                 $is_valid = true;
                 $error_msg = '';
+                $is_replace = false;
+                $columnReplace = [];
 
-                $total_rows = count($imported_data);
+                if(isset($request->column_select) && $request->column_select) {
+                    $columnReplace = explode(',', $request->column_select);
+                    if (count($columnReplace) > 0) {
+                        $is_replace = true;
+                    }
+                }
 
                 foreach ($imported_data as $key => $value) {
                     //Check if any column is missing
@@ -260,20 +277,16 @@ class UnitController extends Controller
                     $unit_array['business_id'] = $business_id;
                     $unit_array['created_by'] = $user_id;
 
-             
+
+                    //Add id
+                    $id = trim($value[0]);
+
+                    $unit_array['id'] = $id;
+
                     //Add SKU
-                    $actual_name = trim($value[0]);
+                    $actual_name = trim($value[1]);
                     if (!empty($actual_name)) {
                         $unit_array['actual_name'] = $actual_name;
-                        //Check if product with same SKU already exist
-                        $is_exist = Unit::where('actual_name', $unit_array['actual_name'])
-                            ->where('business_id', $business_id)
-                            ->exists();
-                        if ($is_exist) {
-                            $is_valid = false;
-                            $error_msg = "Tên đơn vị : $actual_name đã tồn tại ở dòng thứ. $row_no";
-                            break;
-                        }
                     } else {
                         $is_valid = false;
                         $error_msg = "Thiếu tên đơn vị";
@@ -281,7 +294,7 @@ class UnitController extends Controller
                     }
 
                     //Add product name
-                    $short_name = trim($value[1]);
+                    $short_name = trim($value[2]);
                     if (!empty($short_name)) {
                         $unit_array['short_name'] = $short_name;
                     } else {
@@ -298,9 +311,24 @@ class UnitController extends Controller
                 }
 
                 if (!empty($formated_data)) {
-                    foreach ($formated_data as $index => $unit_data) {
-                        //Create new product
-                        Unit::create($unit_data);
+                    foreach ($formated_data as $index => $item) {
+                        $exitItem = Unit::where('id', $item['id'])
+                            ->first();
+
+                        if($exitItem && $is_replace === true) {
+                            $dataUpdate = [];
+
+                            foreach ($columnReplace as $value) {
+                                if (isset($item[$value])) {
+                                    $dataUpdate[$value] = $item[$value];
+                                }
+
+                                Unit::where('id', $item['id'])
+                                    ->update($dataUpdate);
+                            }
+                        } else {
+                            Unit::create($item);
+                        }
                     }
                 }
             }

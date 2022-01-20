@@ -79,33 +79,48 @@ class OrderController extends Controller
 
             $business_id = Auth::guard('api')->user()->business_id;
             $location_id =  $request->location_id;
+            $user_id = Auth::guard('api')->user()->id;
             $stock_id = $request->stock_id;
 
             $purchase = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
                 'sales_person:id,first_name,user_type',
                 'accountants',
             ])
+                ->leftJoin("contacts", "contacts.id", "=", "transactions.contact_id")
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
                 ->where('transactions.type', 'sell_return')
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            if (request()->has('id')) {
-                $id = request()->get('id');
-                if (!empty($id)) {
-                    $purchase->where('transactions.id', $id);
-                }
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
             }
 
             //Add condition for created_by,used in sales representative sales report
-            if (request()->has('created_by')) {
-                $created_by = request()->get('created_by');
-                if (!empty($created_by)) {
-                    $purchase->where('transactions.created_by', $created_by);
-                }
+            $view_all = null;
+
+            if(!empty($request->view_all)) {
+                $view_all = $request->view_all;
+            }
+
+            if(!empty($request->header('view-all'))) {
+                $view_all = $request->header('view-all');
+            }
+
+            if (empty($view_all) || $view_all != "1") {
+                $purchase->where('transactions.created_by', $user_id);
+            }
+
+            if (!empty($request->contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$request->contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
             }
 
             $contact_id = request()->get('contact_id');
@@ -113,20 +128,15 @@ class OrderController extends Controller
                 $purchase->where('transactions.contact_id', $contact_id);
             }
 
-            $start = Carbon::now()->startOfMonth();
-            $end = Carbon::now()->endOfMonth();
-
             if (!empty(request()->start_date)) {
-                $start = Carbon::createFromFormat('d/m/Y', request()->start_date) ;
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->where('transactions.transaction_date', '>=', $start);
             }
 
             if (!empty(request()->end_date)) {
-                $end = Carbon::createFromFormat('d/m/Y', request()->end_date) ;
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->where('transactions.transaction_date', '<=', $end);
             }
-
-
-            $purchase->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end);
 
             $status = request()->status;
 
@@ -158,26 +168,39 @@ class OrderController extends Controller
 
             $purchase->groupBy('transactions.id');
             $purchase->orderBy('transactions.created_at', "desc");
-            $purchase->select();
+            $purchase->select("transactions.*");
 
             $data = $purchase->paginate($request->limit);
 
-            $summary = DB::table('transactions')
-                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
-                ->where('business_id', $business_id)
-                ->where('location_id', $location_id)
-                ->where('type', 'sell_return')
-                ->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end)
-                ->groupBy('status');
+//            $summary = DB::table('transactions')
+//                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
+//                ->where('business_id', $business_id)
+//                ->where('location_id', $location_id)
+//                ->where('type', 'sell_return')
+//                ->groupBy('status');
+//
+//
+//            if (empty($view_all) || $view_all != "1") {
+//                $summary->where('transactions.created_by', $user_id);
+//            }
+//
+//            if (!empty(request()->start_date)) {
+//                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+//                $summary->where('transactions.transaction_date', '>=', $start);
+//            }
+//
+//            if (!empty(request()->end_date)) {
+//                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+//                $summary->where('transactions.transaction_date', '<=', $end);
+//            }
+//
+//            if (!empty($res_order_status) && count($res_order_status) > 0) {
+//                $summary->whereIn('transactions.res_order_status', $res_order_status);
+//            } else if (!empty($res_order_status) && $res_order_status != "all") {
+//                $summary->where('transactions.res_order_status', $res_order_status);
+//            }
 
-            if (!empty($res_order_status) && count($res_order_status) > 0) {
-                $summary->whereIn('transactions.res_order_status', $res_order_status);
-            } else if (!empty($res_order_status) && $res_order_status != "all") {
-                $summary->where('transactions.res_order_status', $res_order_status);
-            }
-
-            return $this->respondSuccess($data, null, ["summary" => $summary->get()]);
+            return $this->respondSuccess($data, null);
         } catch (\Exception $e) {
 //            dd($e);
             $message = $e->getMessage();
@@ -200,7 +223,7 @@ class OrderController extends Controller
                     'stock:id,stock_name,stock_type,location_id',
                     'stock.location:id,name,landmark',
                     'sell_lines.product:id,sku,barcode,name,contact_id,unit_id',
-                    'sell_lines.product.contact:id,name',
+                    'sell_lines.product.contact:id,first_name',
                     'sell_lines.product.unit:id,actual_name',
                     'sell_lines.product.stock_products',
                     'sell_lines.variations',
@@ -333,9 +356,9 @@ class OrderController extends Controller
 
             $transaction = Transaction::create($transaction_data);
 
-            $purchases = $request->input('products');
+            $purchase = $request->input('products');
 
-            $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchases, $currency_details, $enable_product_editing);
+            $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchase, $currency_details, $enable_product_editing);
 
             $dataLog = [
                 'created_by' => $user_id,
@@ -372,7 +395,7 @@ class OrderController extends Controller
                     'stock.location:id,name,landmark',
                     'purchase_lines',
                     'purchase_lines.product:id,sku,name,contact_id,unit_id',
-                    'purchase_lines.product.contact:id,name',
+                    'purchase_lines.product.contact:id,first_name',
                     'purchase_lines.product.unit:id,actual_name',
                     'purchase_lines.product.stock_products',
                     'purchase_lines.variations',
@@ -759,9 +782,9 @@ class OrderController extends Controller
             //Update transaction payment status
             $this->transactionUtil->updatePaymentStatus($transaction->id);
 
-            $purchases = $request->input('products');
+            $purchase = $request->input('products');
 
-            $delete_purchase_lines = $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchases, $currency_details, $enable_product_editing, $before_status);
+            $delete_purchase_lines = $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchase, $currency_details, $enable_product_editing, $before_status);
 
             //Update mapping of purchase & Sell.
             $this->transactionUtil->adjustMappingPurchaseSellAfterEditingPurchase($before_status, $transaction, $delete_purchase_lines);

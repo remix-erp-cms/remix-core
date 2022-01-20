@@ -87,24 +87,31 @@ class OrderImportController extends Controller
             $shipping_statuses = $this->transactionUtil->shipping_statuses();
 //            $purchase = $this->transactionUtil->getListSells($business_id);
             $purchase = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
                 'sales_person:id,first_name,user_type',
                 'accountants',
+                'children:id,ref_no,final_total,invoice_no,type,status'
             ])
+                ->leftJoin("contacts", "contacts.id", "=", "transactions.contact_id")
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
                 ->whereIn('transactions.type', ['purchase', 'sell_return'])
                 ->where('transactions.status', 'approve')
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            //Add condition for created_by,used in sales representative sales report
-            if (request()->has('created_by')) {
-                $created_by = request()->get('created_by');
-                if (!empty($created_by)) {
-                    $purchase->where('transactions.created_by', $created_by);
-                }
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
+            }
+
+            if (!empty($request->contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$request->contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
             }
 
             $contact_id = request()->get('contact_id');
@@ -112,20 +119,15 @@ class OrderImportController extends Controller
                 $purchase->where('transactions.contact_id', $contact_id);
             }
 
-            $start = Carbon::now()->startOfMonth();
-            $end = Carbon::now()->endOfMonth();
-
             if (!empty(request()->start_date)) {
-                $start = Carbon::createFromFormat('d/m/Y', request()->start_date) ;
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->where('transactions.transaction_date', '>=', $start);
             }
 
             if (!empty(request()->end_date)) {
-                $end = Carbon::createFromFormat('d/m/Y', request()->end_date) ;
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->where('transactions.transaction_date', '<=', $end);
             }
-
-
-            $purchase->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end);
 
             $status = request()->status;
 
@@ -156,22 +158,29 @@ class OrderImportController extends Controller
 
             $purchase->groupBy('transactions.id');
             $purchase->orderBy('transactions.created_at', "desc");
-            $purchase->select();
+            $purchase->select("transactions.*");
 
             $data = $purchase->paginate($request->limit);
+//
+//            $summary = DB::table('transactions')
+//                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, res_order_status as status'))
+//                ->where('business_id', $business_id)
+//                ->where('location_id', $location_id)
+//                ->whereIn('type', ['purchase', 'sell_return'])
+//                ->where('transactions.status', 'approve')
+//                ->groupBy('res_order_status');
+//
+//            if (!empty(request()->start_date)) {
+//                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+//                $summary->where('transactions.transaction_date', '>=', $start);
+//            }
+//
+//            if (!empty(request()->end_date)) {
+//                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+//                $summary->where('transactions.transaction_date', '<=', $end);
+//            }
 
-            $summary = DB::table('transactions')
-                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, res_order_status as status'))
-                ->where('business_id', $business_id)
-                ->where('location_id', $location_id)
-                ->whereIn('type', ['purchase', 'sell_return'])
-                ->where('transactions.status', 'approve')
-                ->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end)
-                ->groupBy('res_order_status')
-                ->get();
-
-            return $this->respondSuccess($data, null, ["summary" => $summary]);
+            return $this->respondSuccess($data, null);
         } catch (\Exception $e) {
 //            dd($e);
             $message = $e->getMessage();
@@ -180,6 +189,105 @@ class OrderImportController extends Controller
         }
     }
 
+
+    public function listProduct(Request $request)
+    {
+        try {
+            $business_id = Auth::guard('api')->user()->business_id;
+            $location_id = $request->location_id;
+            $stock_id = $request->stock_id;
+            $user_id = Auth::guard('api')->user()->id;
+
+            $purchase = PurchaseLine::leftJoin('transactions', 'transactions.id', '=', 'purchase_lines.transaction_id')
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
+                ->leftJoin('products', 'products.id', '=', 'purchase_lines.product_id')
+                ->leftJoin('contacts', 'contacts.id', '=', 'products.contact_id')
+                ->leftJoin('units', 'products.unit_id', '=', 'units.id')
+                ->where('transactions.type', 'purchase')
+                ->where('transactions.location_id', $location_id)
+                ->where('transactions.business_id', $business_id)
+                ->select(
+                    'purchase_lines.*',
+                    'transactions.invoice_no',
+                    'transactions.stock_id',
+                    'transactions.status',
+                    'transactions.res_order_status',
+                    'transactions.transaction_date as transaction_date',
+                    'transactions.staff_note as staff_note',
+                    'contacts.id as contact_id',
+                    'contacts.name as contact_name',
+                    'contacts.tax_number as tax_number',
+                    'products.name as product_name',
+                    'units.actual_name as unit_name',
+                    \DB::raw('SUM(purchase_lines.purchase_price * purchase_lines.quantity) as final_total')
+                );
+
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
+            }
+
+            $contact_id = request()->get('contact_id');
+            if (!empty($contact_id)) {
+                $purchase->where('transactions.contact_id', $contact_id);
+            }
+
+            $contact_name = request()->get('contact_name');
+            if (!empty($contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
+            }
+
+            $status = request()->status;
+
+            if (!empty($status) && $status != "all") {
+                $purchase->where('transactions.status', $status);
+            }
+
+            $shipping_status = request()->shipping_status;
+
+            if (!empty($shipping_status) && $shipping_status != "all") {
+                $purchase->where('transactions.shipping_status', $shipping_status);
+            }
+
+            $res_order_status = request()->res_order_status;
+
+            if (!empty($res_order_status) && $res_order_status != "all") {
+                $purchase->where('transactions.res_order_status', $res_order_status);
+            }
+
+            $receipt_status = request()->receipt_status;
+
+            if (!empty($receipt_status) && $receipt_status != "all") {
+                $purchase->where('transactions.receipt_status', $receipt_status);
+            }
+
+            if (!empty(request()->start_date)) {
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->whereDate('transactions.created_at', '>=', $start);
+            }
+
+            if (!empty(request()->end_date)) {
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->whereDate('transactions.created_at', '<=', $end);
+
+            }
+
+            $purchase->groupBy('purchase_lines.id');
+            $purchase->orderBy('purchase_lines.created_at', "desc");
+
+            $res = $purchase->paginate($request->limit);
+
+            return $this->respondSuccess($res, null);
+        } catch (\Exception $e) {
+//            dd($e);
+            $message = $e->getMessage();
+
+            return $this->respondWithError($message, [], 500);
+        }
+    }
 
     public function createInit($id)
     {
@@ -193,7 +301,7 @@ class OrderImportController extends Controller
                     'contact',
                     'purchase_lines',
                     'purchase_lines.product:id,sku,name,contact_id,unit_id',
-                    'purchase_lines.product.contact:id,name',
+                    'purchase_lines.product.contact:id,first_name',
                     'purchase_lines.product.unit:id,actual_name',
                     'purchase_lines.variations',
                     'purchase_lines.variations.product_variation',
@@ -256,7 +364,7 @@ class OrderImportController extends Controller
                     'stock.location:id,name,landmark',
                     'purchase_lines',
                     'purchase_lines.product:id,sku,barcode,name,contact_id,unit_id,enable_sr_no',
-                    'purchase_lines.product.contact:id,name',
+                    'purchase_lines.product.contact:id,first_name',
                     'purchase_lines.product.unit:id,actual_name',
                     'purchase_lines.product.stock_products:id,product_id,stock_id,purchase_price,unit_price,quantity,status',
                     'purchase_lines.product.product_serial:id,purchase_line_id,product_id,serial,is_sell',
@@ -443,8 +551,8 @@ class OrderImportController extends Controller
             $invoice_total = $this->productUtil->calculateTotalPurchaseSold($products, $tax_rate_id, $discount);
 
             $transaction->total_before_tax = $invoice_total['total_before_tax'];
-            $transaction->final_total = $invoice_total['final_total'];
-            $transaction->tax_amount = $invoice_total['tax'];
+//            $transaction->final_total = $invoice_total['final_total'];
+//            $transaction->tax_amount = $invoice_total['tax'];
 
             $transaction->receipt_status = "request";
 

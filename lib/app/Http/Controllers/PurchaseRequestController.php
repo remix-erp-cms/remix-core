@@ -74,53 +74,53 @@ class PurchaseRequestController extends Controller
         $business_id = request()->session()->get('user.business_id');
 
         if (request()->ajax()) {
-            $purchases = $this->transactionUtil->getListPurchasesRequest($business_id);
+            $purchase = $this->transactionUtil->getListPurchasesRequest($business_id);
 
             $permitted_locations = auth()->user()->permitted_locations();
             if ($permitted_locations != 'all') {
-                $purchases->whereIn('transactions.location_id', $permitted_locations);
+                $purchase->whereIn('transactions.location_id', $permitted_locations);
             }
 
             if (!empty(request()->supplier_id)) {
-                $purchases->where('contacts.id', request()->supplier_id);
+                $purchase->where('contacts.id', request()->supplier_id);
             }
             if (!empty(request()->location_id)) {
-                $purchases->where('transactions.location_id', request()->location_id);
+                $purchase->where('transactions.location_id', request()->location_id);
             }
             if (!empty(request()->input('payment_status')) && request()->input('payment_status') != 'overdue') {
-                $purchases->where('transactions.payment_status', request()->input('payment_status'));
+                $purchase->where('transactions.payment_status', request()->input('payment_status'));
             } elseif (request()->input('payment_status') == 'overdue') {
-                $purchases->whereIn('transactions.payment_status', ['payment_due', 'payment_pending', 'payment_paid'])
+                $purchase->whereIn('transactions.payment_status', ['payment_due', 'payment_pending', 'payment_paid'])
                     ->whereNotNull('transactions.pay_term_number')
                     ->whereNotNull('transactions.pay_term_type')
                     ->whereRaw("IF(transactions.pay_term_type='days', DATE_ADD(transactions.transaction_date, INTERVAL transactions.pay_term_number DAY) < CURDATE(), DATE_ADD(transactions.transaction_date, INTERVAL transactions.pay_term_number MONTH) < CURDATE())");
             }
 
             if (!empty(request()->status)) {
-                $purchases->where('transactions.status', request()->status);
+                $purchase->where('transactions.status', request()->status);
             }
             
             if (!empty(request()->start_date) && !empty(request()->end_date)) {
                 $start = request()->start_date;
                 $end =  request()->end_date;
-                $purchases->whereDate('transactions.transaction_date', '>=', $start)
+                $purchase->whereDate('transactions.transaction_date', '>=', $start)
                             ->whereDate('transactions.transaction_date', '<=', $end);
             }
 
 //            if (!auth()->user()->can('purchase_request.view') && auth()->user()->can('view_own_purchase')) {
-//                $purchases->where('transactions.created_by', request()->session()->get('user.id'));
+//                $purchase->where('transactions.created_by', request()->session()->get('user.id'));
 //            }
 
             $type_tab = request()->type_tab;
             if (!empty($type_tab)) {
                 if ($type_tab === "import_stock") {
-                    $purchases->where('transactions.res_order_status', "complete");
+                    $purchase->where('transactions.res_order_status', "complete");
                 } else {
-                    $purchases->where('transactions.status', $type_tab);
+                    $purchase->where('transactions.status', $type_tab);
                 }
             }
 
-            return Datatables::of($purchases)
+            return Datatables::of($purchase)
                 ->addColumn('action', function ($row) {
                     $html = '<div class="btn-group">
                             <button type="button" class="btn btn-info dropdown-toggle btn-xs" 
@@ -838,9 +838,9 @@ class PurchaseRequestController extends Controller
 
             $transaction = Transaction::create($transaction_data);
 
-            $purchases = $request->input('products');
+            $purchase = $request->input('products');
 
-            $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchases, $currency_details, $enable_product_editing);
+            $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchase, $currency_details, $enable_product_editing);
 
             DB::commit();
             
@@ -1224,9 +1224,9 @@ class PurchaseRequestController extends Controller
             //Update transaction payment status
             $this->transactionUtil->updatePaymentStatus($transaction->id);
 
-            $purchases = $request->input('products');
+            $purchase = $request->input('products');
 
-            $delete_purchase_lines = $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchases, $currency_details, $enable_product_editing, $before_status);
+            $delete_purchase_lines = $this->productUtil->createOrUpdatePurchaseLines($transaction, $purchase, $currency_details, $enable_product_editing, $before_status);
 
             //Update mapping of purchase & Sell.
             $this->transactionUtil->adjustMappingPurchaseSellAfterEditingPurchase($before_status, $transaction, $delete_purchase_lines);

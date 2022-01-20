@@ -51,7 +51,7 @@ class AccountReportsController extends Controller
         }
         $business_id = request()->session()->get('user.business_id');
         if (request()->ajax()) {
-            $purchases = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
+            $purchase = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
                 ->join(
                     'business_locations AS BS',
                     'transactions.location_id',
@@ -98,7 +98,7 @@ class AccountReportsController extends Controller
                 ->having('total_paid', ">", 0);
 
 
-            return Datatables::of($purchases)
+            return Datatables::of($purchase)
                 ->addColumn('action', function ($row) {
                     $html = '<div class="btn-group">
                             <button type="button" class="btn btn-info dropdown-toggle btn-xs" 
@@ -177,7 +177,7 @@ class AccountReportsController extends Controller
         }
         $business_id = request()->session()->get('user.business_id');
         if (request()->ajax()) {
-            $purchases = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
+            $purchase = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
                 ->join(
                     'business_locations AS BS',
                     'transactions.location_id',
@@ -225,7 +225,7 @@ class AccountReportsController extends Controller
                 ->having('total_paid', ">", 0);
 
 
-            return Datatables::of($purchases)
+            return Datatables::of($purchase)
                 ->addColumn('action', function ($row) {
                     $html = '<div class="btn-group">
                             <button type="button" class="btn btn-info dropdown-toggle btn-xs" 

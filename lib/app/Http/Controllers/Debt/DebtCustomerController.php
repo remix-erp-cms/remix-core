@@ -12,6 +12,7 @@ use App\Contact;
 use App\CustomerGroup;
 use App\Helpers\Activity;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Payment\PaymentController;
 use App\InvoiceBill;
 use App\InvoiceScheme;
 use App\PayBill;
@@ -57,13 +58,14 @@ class DebtCustomerController extends Controller
      * @param ProductUtils $product
      * @return void
      */
-    public function __construct(ContactUtil $contactUtil, BusinessUtil $businessUtil, TransactionUtil $transactionUtil, ModuleUtil $moduleUtil, ProductUtil $productUtil)
+    public function __construct(PaymentController $paymentUtil, ContactUtil $contactUtil, BusinessUtil $businessUtil, TransactionUtil $transactionUtil, ModuleUtil $moduleUtil, ProductUtil $productUtil)
     {
         $this->contactUtil = $contactUtil;
         $this->businessUtil = $businessUtil;
         $this->transactionUtil = $transactionUtil;
         $this->moduleUtil = $moduleUtil;
         $this->productUtil = $productUtil;
+        $this->paymentUtil = $paymentUtil;
 
         $this->dummyPaymentLine = ['method' => '', 'amount' => 0, 'note' => '', 'card_transaction_number' => '', 'card_number' => '', 'card_type' => '', 'card_holder_name' => '', 'card_month' => '', 'card_year' => '', 'card_security' => '', 'cheque_number' => '', 'bank_account_number' => '',
             'is_return' => 0, 'transaction_no' => ''];
@@ -86,22 +88,24 @@ class DebtCustomerController extends Controller
             $stock_id = $request->stock_id;
 
             $purchase = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
                 'sales_person:id,first_name,user_type',
                 'accountants',
             ])
+                ->leftJoin('contacts', 'contacts.id', '=', 'transactions.contact_id')
                 ->where('transactions.type', 'sell')
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            if (request()->has('id')) {
-                $id = request()->get('id');
-                if (!empty($id)) {
-                    $purchase->where('transactions.id', $id);
-                }
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
+            }
+
+            if (!empty($request->contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$request->contact_name%");
             }
 
             //Add condition for created_by,used in sales representative sales report
@@ -119,8 +123,8 @@ class DebtCustomerController extends Controller
                 $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
 
-                $purchase->whereDate('transactions.transaction_date', '>=', $start)
-                    ->whereDate('transactions.transaction_date', '<=', $end);
+                $purchase->whereDate('transactions.created_at', '>=', $start)
+                    ->whereDate('transactions.created_at', '<=', $end);
             }
 
             $status = request()->status;
@@ -159,7 +163,7 @@ class DebtCustomerController extends Controller
 
             $purchase->groupBy('transactions.contact_id', 'transactions.payment_status');
             $purchase->orderBy('transactions.created_at', "desc");
-            $purchase->select(DB::raw('sum(final_total) as final_total, contact_id, payment_status'));
+            $purchase->select(DB::raw('sum(final_total) as final_total, transactions.contact_id, payment_status'));
 
 
             $data = $purchase->paginate($request->limit);
@@ -206,7 +210,7 @@ class DebtCustomerController extends Controller
             $stock_id = $request->stock_id;
 
             $purchase = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
@@ -217,12 +221,10 @@ class DebtCustomerController extends Controller
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            if (request()->has('id')) {
-                $id = request()->get('id');
-                if (!empty($id)) {
-                    $purchase->where('transactions.id', $id);
-                }
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
             }
+
 
             //Add condition for created_by,used in sales representative sales report
             if (request()->has('created_by')) {
@@ -243,13 +245,13 @@ class DebtCustomerController extends Controller
             if (!empty(request()->start_date)) {
                 $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
 
-                $purchase->whereDate('transactions.transaction_date', '>=', $start);
+                $purchase->whereDate('transactions.created_at', '>=', $start);
             }
 
             if (!empty(request()->end_date)) {
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
 
-                $purchase->whereDate('transactions.transaction_date', '<=', $end);
+                $purchase->whereDate('transactions.created_at', '<=', $end);
             }
 
             $status = request()->status;
@@ -332,15 +334,22 @@ class DebtCustomerController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $location_id = $request->location_id;
             $stock_id = $request->stock_id;
-            $stock_id = $request->stock_id;
+            $user_id = Auth::guard('api')->user()->id;
 
             $purchase = TransactionSellLine::leftJoin('transactions', 'transactions.id', '=', 'transaction_sell_lines.transaction_id')
                 ->leftJoin('contacts', 'contacts.id', '=', 'transactions.contact_id')
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
                 ->leftJoin('products', 'products.id', '=', 'transaction_sell_lines.product_id')
                 ->leftJoin('units', 'products.unit_id', '=', 'units.id')
+                ->leftJoin('business_locations', 'business_locations.id', '=', 'transactions.location_id')
+                ->where('transactions.location_id', $location_id)
+                ->where('transactions.business_id', $business_id)
                 ->where('transactions.status', 'approve')
+                ->where('transactions.receipt_status', 'approve')
+                ->where('transactions.type', 'sell')
                 ->select(
                     'transaction_sell_lines.*',
+                    'transactions.invoice_no',
                     'transactions.stock_id',
                     'transactions.status',
                     'transactions.res_order_status',
@@ -350,22 +359,30 @@ class DebtCustomerController extends Controller
                     'contacts.tax_number as tax_number',
                     'products.name as product_name',
                     'units.actual_name as unit_name',
-                    \DB::raw('SUM(transaction_sell_lines.unit_price * transaction_sell_lines.quantity_sold) as final_total')
+                    'products.sku as product_sku',
+                    'users.first_name as created_by',
+                    'business_locations.name as location_name',
+                    \DB::raw('SUM(transaction_sell_lines.unit_price * transaction_sell_lines.quantity) as final_total')
                 );
 
-            if (request()->has('id')) {
-                $id = request()->get('id');
-                if (!empty($id)) {
-                    $purchase->where('transactions.id', $id);
-                }
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
             }
 
             //Add condition for created_by,used in sales representative sales report
-            if (request()->has('created_by')) {
-                $created_by = request()->get('created_by');
-                if (!empty($created_by)) {
-                    $purchase->where('transactions.created_by', $created_by);
-                }
+            $view_all = null;
+
+            if(!empty($request->view_all)) {
+                $view_all = $request->view_all;
+            }
+
+            if(!empty($request->header('view-all'))) {
+                $view_all = $request->header('view-all');
+            }
+
+            if (empty($view_all) || $view_all != "1") {
+                $purchase->where('transactions.created_by', $user_id);
+                return $this->respondWithError($purchase->toSql(), [], 500);
             }
 
             $contact_id = request()->get('contact_id');
@@ -373,25 +390,48 @@ class DebtCustomerController extends Controller
                 $purchase->where('transactions.contact_id', $contact_id);
             }
 
-            $start = null;
-            $end = null;
-
-            if (!empty(request()->start_date)) {
-                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
-
-                $purchase->whereDate('transactions.transaction_date', '>=', $start);
+            $contact_name = request()->get('contact_name');
+            if (!empty($contact_name)) {
+                $purchase->where('contacts.first_name',"LIKE", "%$contact_name%");
             }
 
-            if (!empty(request()->end_date)) {
-                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
-
-                $purchase->whereDate('transactions.transaction_date', '<=', $end);
+            if (!empty($request->employee)) {
+                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
             }
 
             $status = request()->status;
 
             if (!empty($status) && $status != "all") {
                 $purchase->where('transactions.status', $status);
+            }
+
+            $shipping_status = request()->shipping_status;
+
+            if (!empty($shipping_status) && $shipping_status != "all") {
+                $purchase->where('transactions.shipping_status', $shipping_status);
+            }
+
+            $res_order_status = request()->res_order_status;
+
+            if (!empty($res_order_status) && $res_order_status != "all") {
+                $purchase->where('transactions.res_order_status', $res_order_status);
+            }
+
+            $receipt_status = request()->receipt_status;
+
+            if (!empty($receipt_status) && $receipt_status != "all") {
+                $purchase->where('transactions.receipt_status', $receipt_status);
+            }
+
+            if (!empty(request()->start_date)) {
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->whereDate('transactions.created_at', '>=', $start);
+            }
+
+            if (!empty(request()->end_date)) {
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->whereDate('transactions.created_at', '<=', $end);
+
             }
 
             $payment_status = request()->payment_status;
@@ -406,26 +446,8 @@ class DebtCustomerController extends Controller
                 $purchase->where('transactions.shipping_status', $shipping_status);
             }
 
-            $receipt_status = request()->receipt_status;
-
-            if (!empty($receipt_status) && $receipt_status != "all") {
-                $purchase->where('transactions.receipt_status', $receipt_status);
-            }
-
-            if (empty($receipt_status)) {
-                $purchase->where('transactions.receipt_status', "approve");
-            }
-
-            $res_order_status = request()->res_order_status;
-
-            if (!empty($res_order_status) && count($res_order_status) > 0) {
-                $purchase->whereIn('transactions.res_order_status', $res_order_status);
-            } else if (!empty($res_order_status) && $res_order_status != "all") {
-                $purchase->where('transactions.res_order_status', $res_order_status);
-            }
-
             $purchase->groupBy('transaction_sell_lines.id');
-            $purchase->orderBy('transaction_sell_lines.created_at', "desc");
+            $purchase->orderBy('transaction_sell_lines.created_at', "asc");
 
             $data = $purchase->paginate($request->limit);
 
@@ -525,7 +547,7 @@ class DebtCustomerController extends Controller
 
             $result = Transaction::where('contact_id', $contactId)
                 ->with([
-                    'contact:id,name,mobile,email,tax_number,type',
+                    'contact:id,first_name,mobile,email,tax_number,type',
                 ])
                 ->where('receipt_status', "approve")
                 ->whereIn('id', $transactionIds)
@@ -540,10 +562,13 @@ class DebtCustomerController extends Controller
             }
 
             foreach ($result as $transaction) {
-                $input = [
+                $note = "Thanh toán công nợ cho khách hàng " . $transaction->contact->name;
+
+                $dataPaybill = [
                     'accountant_date' => now(),
                     'contact_id' => $contactId,
                     'credit' => $transaction->final_total,
+                    'transaction_id' => $transaction->id,
                     'debit' => 0,
                     'fee' => 0,
                     'final_total' => $transaction->final_total,
@@ -551,16 +576,39 @@ class DebtCustomerController extends Controller
                     'stock_id' => $request->stock_id,
                     'tax' => $transaction->tax_amount,
                     'total_before_tax' => $transaction->total_before_tax,
-                    'transaction_id' => $transaction->id,
-                    'note' => "Thanh toán toàn bộ công nợ cho khách hàng " . $transaction->contact->name,
+                    'note' => $note,
                     'payment_method' => $request->payment_method,
-                    'type' => "receive",
+                    'type' => "credit",
+                    "type_bill" => "receive",
+                    'payment' => (object)[
+                        "payment_no" => $transaction->invoice_no,
+                        "note" => $note,
+                    ],
+                    'payment_lines' => [
+                        (object)[
+                            "amount" => $transaction->final_total,
+                            "note" => $note,
+                        ]
+                    ],
                 ];
 
-
-                $resultPay = $this->payDebtTransaction($input, $business_id, $user_id);
+                $resultPay = $this->paymentUtil->insertPayment($dataPaybill, $business_id, $user_id);
 
                 if ($resultPay->status === false) {
+                    DB::rollBack();
+                    $message = $resultPay->msg ?? "Xảy ra lỗi trong quá trình tạo chứng từ";
+                    return $this->respondWithError($message, [], 500);
+                }
+
+                $dataTransaction = [
+                    'payment_status' => "payment_paid",
+                    'payment_method' => $request->payment_method
+                ];
+
+                $result_pay_bill = Transaction::where('id', $transaction->id)
+                    ->update($dataTransaction);
+
+                if ($result_pay_bill === false) {
                     DB::rollBack();
                     $message = $resultPay->msg ?? "Xảy ra lỗi trong quá trình tạo chứng từ";
                     return $this->respondWithError($message, [], 500);
@@ -597,12 +645,6 @@ class DebtCustomerController extends Controller
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
 
-            $input = $request->only([
-                'contact_id',
-                'total_pay',
-                'payment_method'
-            ]);
-
             $request->validate([
                 'contact_id' => 'required',
                 'payment_method' => 'required',
@@ -612,7 +654,7 @@ class DebtCustomerController extends Controller
 
             $result = Transaction::where('contact_id', $contactId)
                 ->with([
-                    'contact:id,name,mobile,email,tax_number,type',
+                    'contact:id,first_name,mobile,email,tax_number,type',
                 ])
                 ->where('receipt_status', "approve")
                 ->whereIn('payment_status', ['payment_pending'])
@@ -625,8 +667,8 @@ class DebtCustomerController extends Controller
             }
 
             foreach ($result as $transaction) {
+                $note = "Thanh toán toàn bộ công nợ cho khách hàng " . $transaction->contact->name;
                 $input = [
-                    'accountant_date' => now(),
                     'contact_id' => $contactId,
                     'credit' => $transaction->final_total,
                     'debit' => 0,
@@ -637,13 +679,40 @@ class DebtCustomerController extends Controller
                     'tax' => $transaction->tax_amount,
                     'total_before_tax' => $transaction->total_before_tax,
                     'transaction_id' => $transaction->id,
-                    'note' => "Thanh toán toàn bộ công nợ cho khách hàng " . $transaction->contact->name,
-                    'payment_method' => $request->payment_method,
-                    'type' => "receive",
+                    'type' => "debit",
+                    "type_bill" => "pay",
+                    "payment_method" => $request->payment_method,
+                    'payment' => (object)[
+                        "payment_no" => $result->invoice_no,
+                        "note" => $note,
+                    ],
+                    'payment_lines' => [
+                        (object)[
+                            "amount" => $transaction->final_total,
+                            "note" => $note,
+                        ]
+                    ],
                 ];
 
+                $dataPaybill = [
+                    'accountant_date' => now(),
+                    'contact_id' => $contactId,
+                    'credit' => $transaction->final_total,
+                    'transaction_id' => $transaction->id,
+                    'debit' => 0,
+                    'fee' => 0,
+                    'final_total' => $transaction->final_total,
+                    'location_id' => $request->location_id,
+                    'stock_id' => $request->stock_id,
+                    'tax' => $transaction->tax_amount,
+                    'total_before_tax' => $transaction->total_before_tax,
+                    'note' => "Thanh toán công nợ cho khách hàng " . $transaction->contact->name,
+                    'payment_method' => $request->payment_method,
+                    'type' => "credit",
+                    "type_bill" => "receive",
+                ];
 
-                $resultPay = $this->payDebtTransaction($input, $business_id, $user_id);
+                $resultPay = $this->paymentUtil->insertPayment($dataPaybill, $business_id, $user_id);
 
                 if ($resultPay->status === false) {
                     DB::rollBack();
@@ -675,6 +744,7 @@ class DebtCustomerController extends Controller
         }
     }
 
+
     private function payDebtTransaction($input, $business_id, $user_id)
     {
         try {
@@ -692,7 +762,7 @@ class DebtCustomerController extends Controller
                 ];
             }
 
-            $ref_count = $this->productUtil->setAndGetReferenceCount("sell_payment", $business_id);
+            $ref_count = $this->productUtil->setAndGetReferenceCount("purchase_payment", $business_id);
 
             $location_id = $input["location_id"];
             $contact_id = $input["contact_id"];
@@ -711,7 +781,7 @@ class DebtCustomerController extends Controller
                 "note" => $note,
                 "method" => $payment_method,
                 "status" => "received",
-                "type" => "credit",
+                "type" => "debit",
                 "amount" => $credit,
                 "ref_no" => "CT" . $ref_count,
                 "created_at" => now(),

@@ -4152,7 +4152,7 @@ class TransactionUtil extends Util
      */
     public function getListPurchases($business_id)
     {
-        $purchases = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
+        $purchase = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
             ->join(
                 'business_locations AS BS',
                 'transactions.location_id',
@@ -4199,7 +4199,7 @@ class TransactionUtil extends Util
             )
             ->groupBy('transactions.id');
 
-        return $purchases;
+        return $purchase;
     }
 
 
@@ -4209,7 +4209,7 @@ class TransactionUtil extends Util
 
     public function getListRequestStock($business_id)
     {
-        $purchases = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
+        $purchase = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
             ->join(
                 'business_locations AS BS',
                 'transactions.location_id',
@@ -4261,7 +4261,7 @@ class TransactionUtil extends Util
             )
             ->groupBy('transactions.id');
 
-        return $purchases;
+        return $purchase;
     }
 
     /**
@@ -4271,7 +4271,7 @@ class TransactionUtil extends Util
      */
     public function getListPurchasesRequest($business_id)
     {
-        $purchases = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
+        $purchase = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
             ->join(
                 'business_locations AS BS',
                 'transactions.location_id',
@@ -4315,7 +4315,7 @@ class TransactionUtil extends Util
             )
             ->groupBy('transactions.id');
 
-        return $purchases;
+        return $purchase;
     }
 
     /**

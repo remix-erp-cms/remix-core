@@ -32,6 +32,7 @@ use App\VariationLocationDetails;
 use App\VariationTemplate;
 use App\Warranty;
 use Balping\JsonRaw\Raw;
+use Carbon\Carbon;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -118,6 +119,7 @@ class ProductController extends Controller
                 'transaction_sell_lines.product_id',
                 DB::raw('MAX(transaction_sell_lines.id) as id'))
             ->groupBy('transaction_sell_lines.product_id');
+        $stock_id = request()->get('stock_id', null);
 
         $products = Product::leftJoinSub($latestTransactionLines, 'tsl2', function ($join) {
             $join->on('products.id', '=', 'tsl2.product_id');
@@ -127,6 +129,34 @@ class ProductController extends Controller
                 'tsl.id',
                 '=',
                 'tsl2.id'
+            )
+            ->leftJoin("stock_products", function ($join) use($stock_id) {
+                $join->on('stock_products.product_id', '=', 'products.id');
+                $join->on('stock_products.stock_id', '=', DB::raw($stock_id));
+            })
+            ->leftJoin(
+                'units',
+                'units.id',
+                '=',
+                'products.unit_id'
+            )
+            ->leftJoin(
+                'brands',
+                'brands.id',
+                '=',
+                'products.brand_id'
+            )
+            ->leftJoin(
+                'categories',
+                'categories.id',
+                '=',
+                'products.category_id'
+            )
+            ->leftJoin(
+                'contacts',
+                'contacts.id',
+                '=',
+                'products.contact_id'
             )
             ->where('tsl.id', '<>', null)
             ->with([
@@ -158,13 +188,6 @@ class ProductController extends Controller
             )
             ->groupBy("products.id");
 
-        $stock_id = request()->get('stock_id', null);
-        if (!empty($stock_id)) {
-            $products->whereHas('stock_products', function ($products) use ($stock_id) {
-                $products->where('stock_products.stock_id', '=', $stock_id);
-            });
-        }
-
         $status = request()->get('status', null);
         if (!empty($status) && $status !== "all") {
             $products->whereHas('stock_products', function ($products) use ($status) {
@@ -185,6 +208,21 @@ class ProductController extends Controller
         $unit_id = request()->get('unit_id', null);
         if (!empty($unit_id)) {
             $products->where('products.unit_id', $unit_id);
+        }
+
+        $category = request()->get('category', null);
+        if (!empty($category)) {
+            $products->where("categories.name", "LIKE", "%$category%");
+        }
+
+        $brand = request()->get('brand', null);
+        if (!empty($brand)) {
+            $products->where("brands.name", "LIKE", "%$brand%");
+        }
+
+        $unit = request()->get('unit', null);
+        if (!empty($unit)) {
+            $products->where("units.actual_name", "LIKE", "%$unit%");
         }
 
         $tax_id = request()->get('tax_id', null);
@@ -227,8 +265,18 @@ class ProductController extends Controller
             $products->where('products.image', "");
         }
 
-        $products->orderBy('products.created_at', "desc");
-        $products->orderBy('products.name', 'asc');
+        $sort_field = "products.created_at";
+        $sort_des = "desc";
+
+        if(isset($request->order_field) && $request->order_field) {
+            $sort_field = $request->order_field;
+        }
+
+        if(isset($request->order_by) && $request->order_by) {
+            $sort_des = $request->order_by;
+        }
+
+        $products->orderBy($sort_field, $sort_des);
 
         $data = $products->paginate($request->limit);
         return $data;
@@ -237,7 +285,36 @@ class ProductController extends Controller
 
     private function getListAllProduct($request, $business_id, $contact_id = null)
     {
+        $stock_id = request()->get('stock_id', null);
         $query = Product::where('products.business_id', $business_id)
+            ->leftJoin("stock_products", function ($join) use($stock_id) {
+                $join->on('stock_products.product_id', '=', 'products.id');
+                $join->on('stock_products.stock_id', '=', DB::raw($stock_id));
+            })
+            ->leftJoin(
+                'units',
+                'units.id',
+                '=',
+                'products.unit_id'
+            )
+            ->leftJoin(
+                'categories',
+                'categories.id',
+                '=',
+                'products.category_id'
+            )
+            ->leftJoin(
+                'brands',
+                'brands.id',
+                '=',
+                'products.brand_id'
+            )
+            ->leftJoin(
+                'contacts',
+                'contacts.id',
+                '=',
+                'products.contact_id'
+            )
             ->with([
                 'product_images',
                 'stock_products',
@@ -248,9 +325,10 @@ class ProductController extends Controller
                 "warranty"
             ])
             ->where('products.type', '!=', 'modifier');
+
         if (!empty($contact_id)) {
-            $query->where("contact_id", $contact_id);
-}
+            $query->where("products.contact_id", $contact_id);
+        }
 
         $products = $query->select(
             'products.id',
@@ -265,21 +343,13 @@ class ProductController extends Controller
             'products.brand_id',
             'products.category_id',
             'products.contact_id',
-            'products.warranty_id'
+            'products.warranty_id',
+            'products.created_at'
         )->groupBy('products.id');
-
-        $stock_id = request()->get('stock_id', null);
-        if (!empty($stock_id)) {
-            $products->whereHas('stock_products', function ($products) use ($stock_id) {
-                $products->where('stock_products.stock_id', '=', $stock_id);
-            });
-        }
 
         $status = request()->get('status', null);
         if (!empty($status) && $status !== "all") {
-            $products->whereHas('stock_products', function ($products) use ($status) {
-                $products->where('stock_products.status', '=', $status);
-            });
+            $products->where('stock_products.status', '=', $status);
         }
 
         $category_id = request()->get('category_id', null);
@@ -295,6 +365,21 @@ class ProductController extends Controller
         $unit_id = request()->get('unit_id', null);
         if (!empty($unit_id)) {
             $products->where('products.unit_id', $unit_id);
+        }
+
+        $category = request()->get('category', null);
+        if (!empty($category)) {
+            $products->where("categories.name", "LIKE", "%$category%");
+        }
+
+        $brand = request()->get('brand', null);
+        if (!empty($brand)) {
+            $products->where("brands.name", "LIKE", "%$brand%");
+        }
+
+        $unit = request()->get('unit', null);
+        if (!empty($unit)) {
+            $products->where("units.actual_name", "LIKE", "%$unit%");
         }
 
         $tax_id = request()->get('tax_id', null);
@@ -315,6 +400,11 @@ class ProductController extends Controller
             $products->where('products.contact_id', $contact_id);
         }
 
+        if (isset($request->contact_name) && $request->contact_name) {
+            $products->where("contacts.first_name", "LIKE", "%$request->contact_name%")
+                ->orWhere("contacts.supplier_business_name", "LIKE", "%$request->contact_name%");
+        }
+
         if (isset($request->barcode) && $request->barcode) {
             $products->where("products.barcode", "LIKE", "%$request->barcode%");
         }
@@ -337,13 +427,33 @@ class ProductController extends Controller
                 ->orWhere("products.barcode", "LIKE", "%$request->keyword%");
         }
 
+        if (!empty(request()->start_date)) {
+            $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+            $products->where('products.created_at', '>=', $start);
+        }
+
+        if (!empty(request()->end_date)) {
+            $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+            $products->where('products.created_at', '<=', $end);
+        }
+
         $is_image = request()->get('is_image');
         if (!empty($is_image)) {
             $products->where('products.image', "");
         }
 
-        $products->orderBy('products.created_at', "desc");
-        $products->orderBy('products.name', 'asc');
+        $sort_field = "products.created_at";
+        $sort_des = "desc";
+
+        if(isset($request->order_field) && $request->order_field) {
+            $sort_field = $request->order_field;
+        }
+
+        if(isset($request->order_by) && $request->order_by) {
+            $sort_des = $request->order_by;
+        }
+
+        $products->orderBy($sort_field, $sort_des);
         $data = $products->paginate($request->limit);
         return $data;
     }
@@ -478,6 +588,7 @@ class ProductController extends Controller
                         'purchase_price' => !empty($item["purchase_price"]) ? $item["purchase_price"] : 0,
                         'unit_price' => !empty($item["sell_price"]) ? $item["sell_price"] : 0,
                         'sale_price' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
+                        'sale_price_max' => !empty($item["sale_price_max"]) ? $item["sale_price_max"] : 0,
                         'status' => $status,
                         'created_at' => now(),
                     ];
@@ -782,6 +893,7 @@ class ProductController extends Controller
                         'purchase_price' => !empty($item["purchase_price"]) ? $item["purchase_price"] : 0,
                         'unit_price' => !empty($item["sell_price"]) ? $item["sell_price"] : 0,
                         'sale_price' => !empty($item["sale_price"]) ? $item["sale_price"] : 0,
+                        'sale_price_max' => !empty($item["sale_price_max"]) ? $item["sale_price_max"] : 0,
                         'status' => $status,
                         'updated_at' => now(),
                     ];
@@ -1121,8 +1233,6 @@ class ProductController extends Controller
 
     public function importData(Request $request)
     {
-        DB::beginTransaction();
-
         try {
             $business_id = Auth::guard('api')->user()->business_id;
             $user_id = Auth::guard('api')->user()->id;
@@ -1143,9 +1253,18 @@ class ProductController extends Controller
                 $prices_data = [];
 
                 $is_valid = true;
+                $is_replace = false;
+                $columnReplace = [];
                 $error_msg = '';
 
                 $total_rows = count($imported_data);
+
+                if(isset($request->column_select) && $request->column_select) {
+                    $columnReplace = explode(',', $request->column_select);
+                    if (count($columnReplace) > 0) {
+                        $is_replace = true;
+                    }
+                }
 
                 foreach ($imported_data as $key => $value) {
                     //Check if any column is missing
@@ -1193,6 +1312,38 @@ class ProductController extends Controller
                         break;
                     }
 
+                    //Add category
+                    $category_name = trim($value[4]);
+                    if (!empty($category_name)) {
+                        $category = Category::where('business_id', $business_id)
+                            ->where(function ($query) use ($category_name) {
+                                $query->where('name', $category_name);
+                            })->first();
+                        if (!empty($category)) {
+                            $product_array['category_id'] = $category->id;
+                        } else {
+                            $is_valid = false;
+                            $error_msg = "Danh mục không được tìm thấy ở hàng thứ . $row_no";
+                            break;
+                        }
+                    }
+
+                    //Add brand
+                    $brand_name = trim($value[5]);
+                    if (!empty($brand_name)) {
+                        $brand = Brands::where('business_id', $business_id)
+                            ->where(function ($query) use ($brand_name) {
+                                $query->where('name', $brand_name);
+                            })->first();
+                        if (!empty($brand)) {
+                            $product_array['brand_id'] = $brand->id;
+                        } else {
+                            $is_valid = false;
+                            $error_msg = "Thương hiệu không được tìm thấy ở hàng thứ . $row_no";
+                            break;
+                        }
+                    }
+
                     // supplier
                     $category_name = trim($value[2]);
                     if (!empty($category_name)) {
@@ -1222,7 +1373,7 @@ class ProductController extends Controller
                         $is_exist = Product::where('sku', $product_array['sku'])
                             ->where('business_id', $business_id)
                             ->exists();
-                        if ($is_exist) {
+                        if ($is_exist && $is_replace === false) {
                             $is_valid = false;
                             $error_msg = "$sku SKU đã tồn tại ở dòng thứ. $row_no";
                             break;
@@ -1232,16 +1383,22 @@ class ProductController extends Controller
                     }
 
                     // sell price
-                    $sell_price = trim($value[6]);
-                    $purchase_price = trim($value[5]);
-                    $quantity = trim($value[7]);
+                    $sell_price = trim($value[8]);
+                    $purchase_price = trim($value[7]);
+                    $quantity = trim($value[9]);
+                    $sale_price = trim($value[10]);
+                    $sale_price_max = trim($value[11]);
 
                     if (!$sell_price) $sell_price = 0;
                     if (!$purchase_price) $purchase_price = 0;
                     if (!$quantity) $quantity = 0;
+                    if (!$sale_price) $sale_price = 0;
+                    if (!$sale_price_max) $sale_price_max = 0;
 
                     $formated_data[] = $product_array;
                     $prices_data[] = [
+                        "sale_price" => $sale_price,
+                        "sale_price_max" => $sale_price_max,
                         "sell_price" => $sell_price,
                         "purchase_price" => $purchase_price,
                         "quantity" => $quantity
@@ -1254,36 +1411,62 @@ class ProductController extends Controller
 
                 if (!empty($formated_data)) {
                     foreach ($formated_data as $index => $product_data) {
-                        //Create new product
-                        $product = Product::create($product_data);
-
                         $data_stock = [
                             "stock_id" => 6,
-                            "product_id" => $product->id,
                             "purchase_price" => $prices_data[$index]['purchase_price'],
                             "unit_price" => $prices_data[$index]['sell_price'],
+                            "sale_price" => $prices_data[$index]['sale_price'],
+                            "sale_price_max" => $prices_data[$index]['sale_price_max'],
                             "quantity" => $prices_data[$index]['quantity'],
                             "status" => "approve",
                         ];
 
-                        $stock_product = StockProduct::create($data_stock);
+                        //Create new product
+                        $prodItem = Product::where('sku', $product_data['sku'])
+                            ->where('business_id', $business_id)
+                            ->first();
 
-                        //If auto generate sku generate new sku
-                        if ($product->sku == ' ') {
-                            $sku = $this->productUtil->generateProductSku($product->id);
-                            $product->sku = $sku;
-                            $product->save();
+                        if($prodItem && $is_replace === true) {
+                            $dataProductUpdate = [];
+                            $dataPriceUpdate = [];
+
+                            foreach ($columnReplace as $value) {
+                                if (isset($product_data[$value])) {
+                                    $dataProductUpdate[$value] = $product_data[$value];
+                                }
+
+                                if (isset($data_stock[$value])) {
+                                    $dataPriceUpdate[$value] = $data_stock[$value];
+                                }
+
+                                Product::where('sku', $product_data['sku'])
+                                    ->update($dataProductUpdate);
+
+                                StockProduct::where('stock_id', 6)
+                                    ->where("product_id", $prodItem->id)
+                                    ->update($dataPriceUpdate);
+                            }
+                        } else {
+                            $product = Product::create($product_data);
+
+                            $data_stock["product_id"] = $product->id;
+
+                            StockProduct::create($data_stock);
+
+                            if ($product->sku == ' ') {
+                                $sku = $this->productUtil->generateProductSku($product->id);
+                                $product->sku = $sku;
+                                $product->save();
+                            }
                         }
                     }
                 }
             }
 
-            DB::commit();
             $message = "Nhập liệu sản phẩm thành công";
 
-            return $this->respondSuccess($product, $message);
+            return $this->respondSuccess([], $message);
         } catch (\Exception $e) {
-            DB::rollBack();
             $message = $e->getMessage();
 
             return $this->respondWithError($message, [], 500);

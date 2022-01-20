@@ -608,10 +608,10 @@ class AjaxController extends Controller
                         'username' => $userInput->username,
                         "email" => isset($input['email']) ? $input['email'] : null,
                         "contact_number" => isset($input['mobile']) ? $input['mobile'] : null,
-                        'allow_login' => 0
+                        'allow_login' => 0,
                     ];
 
-                    $user_details['status'] = !empty($userInput->is_active) ? $userInput->is_active : 'inactive';
+                    $user_details['status'] = !empty($userInput->status) ? $userInput->status : 'inactive';
 
                     if (!empty($userInput->password)) {
                         $user_details['password'] = $userInput->password;
@@ -1465,12 +1465,19 @@ class AjaxController extends Controller
 
                 $is_valid = true;
                 $error_msg = '';
+                $is_replace = false;
+                $columnReplace = [];
 
-                $total_rows = count($imported_data);
+                if(isset($request->column_select) && $request->column_select) {
+                    $columnReplace = explode(',', $request->column_select);
+                    if (count($columnReplace) > 0) {
+                        $is_replace = true;
+                    }
+                }
 
                 foreach ($imported_data as $key => $value) {
                     //Check if any column is missing
-                    if (count($value) < 6 ) {
+                    if (count($value) < 5 ) {
                         $is_valid =  false;
                         $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
                         break;
@@ -1490,16 +1497,6 @@ class AjaxController extends Controller
                         $contact_array['supplier_business_name'] = $actual_name;
                         $contact_array['name'] = $actual_name;
                         $contact_array['first_name'] = $actual_name;
-                        //Check if product with same SKU already exist
-                        $is_exist = Contact::where('name', $contact_array['name'])
-                            ->where('business_id', $business_id)
-                            ->where('type', "supplier")
-                            ->exists();
-                        if ($is_exist) {
-                            $is_valid = false;
-                            $error_msg = "Tên liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
-                            break;
-                        }
                     } else {
                         $is_valid = false;
                         $error_msg = "Thiếu tên liên hệ";
@@ -1508,18 +1505,7 @@ class AjaxController extends Controller
 
                     //Add product name
                     $contact_id = trim($value[0]);
-                    if (!empty($contact_id)) {
-                        $contact_array['contact_id'] = $contact_id;
-                        $is_exist = Contact::where('contact_id', $contact_array['contact_id'])
-                            ->where('business_id', $business_id)
-                            ->where('type', "supplier")
-                            ->exists();
-                        if ($is_exist) {
-                            $is_valid = false;
-                            $error_msg = "ID liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
-                            break;
-                        }
-                    }
+                    $contact_array['id'] = $contact_id;
 
                     $address = trim($value[2]);
                     if (!empty($address)) {
@@ -1531,12 +1517,7 @@ class AjaxController extends Controller
                         $contact_array['mobile'] = $phone;
                     }
 
-                    $fax = trim($value[4]);
-                    if (!empty($fax)) {
-                        $contact_array['custom_field4'] = $fax;
-                    }
-
-                    $email = trim($value[5]);
+                    $email = trim($value[4]);
                     if (!empty($email)) {
                         $contact_array['email'] = $email;
                     }
@@ -1549,9 +1530,25 @@ class AjaxController extends Controller
                 }
 
                 if (!empty($formated_data)) {
-                    foreach ($formated_data as $index => $contact_data) {
-                        //Create new product
-                        Contact::create($contact_data);
+
+                    foreach ($formated_data as $index => $item) {
+                        $exitItem = Contact::where('id', $item['id'])
+                            ->first();
+
+                        if($exitItem && $is_replace === true) {
+                            $dataUpdate = [];
+
+                            foreach ($columnReplace as $value) {
+                                if (isset($item[$value])) {
+                                    $dataUpdate[$value] = $item[$value];
+                                }
+
+                                Contact::where('id', $item['id'])
+                                    ->update($dataUpdate);
+                            }
+                        } else {
+                            Contact::create($item);
+                        }
                     }
                 }
             }
@@ -1593,12 +1590,19 @@ class AjaxController extends Controller
 
                 $is_valid = true;
                 $error_msg = '';
+                $is_replace = false;
+                $columnReplace = [];
 
-                $total_rows = count($imported_data);
+                if(isset($request->column_select) && $request->column_select) {
+                    $columnReplace = explode(',', $request->column_select);
+                    if (count($columnReplace) > 0) {
+                        $is_replace = true;
+                    }
+                }
 
                 foreach ($imported_data as $key => $value) {
                     //Check if any column is missing
-                    if (count($value) < 6 ) {
+                    if (count($value) < 5 ) {
                         $is_valid =  false;
                         $error_msg = "Thiếu cột trong quá trình tải lên dữ liệu. vui lòng tuần thủ dữ template";
                         break;
@@ -1618,16 +1622,6 @@ class AjaxController extends Controller
                         $contact_array['supplier_business_name'] = $actual_name;
                         $contact_array['name'] = $actual_name;
                         $contact_array['first_name'] = $actual_name;
-                        //Check if product with same SKU already exist
-                        $is_exist = Contact::where('name', $contact_array['name'])
-                            ->where('business_id', $business_id)
-                            ->where('type', "customer")
-                            ->exists();
-                        if ($is_exist) {
-                            $is_valid = false;
-                            $error_msg = "Tên liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
-                            break;
-                        }
                     } else {
                         $is_valid = false;
                         $error_msg = "Thiếu tên liên hệ";
@@ -1636,18 +1630,7 @@ class AjaxController extends Controller
 
                     //Add product name
                     $contact_id = trim($value[0]);
-                    if (!empty($contact_id)) {
-                        $contact_array['contact_id'] = $contact_id;
-                        $is_exist = Contact::where('contact_id', $contact_array['contact_id'])
-                            ->where('business_id', $business_id)
-                            ->where('type', "customer")
-                            ->exists();
-                        if ($is_exist) {
-                            $is_valid = false;
-                            $error_msg = "ID liên hệ : $actual_name đã tồn tại ở dòng thứ. $row_no";
-                            break;
-                        }
-                    }
+                    $contact_array['id'] = $contact_id;
 
                     $address = trim($value[2]);
                     if (!empty($address)) {
@@ -1659,12 +1642,7 @@ class AjaxController extends Controller
                         $contact_array['mobile'] = $phone;
                     }
 
-                    $fax = trim($value[4]);
-                    if (!empty($fax)) {
-                        $contact_array['custom_field4'] = $fax;
-                    }
-
-                    $email = trim($value[5]);
+                    $email = trim($value[4]);
                     if (!empty($email)) {
                         $contact_array['email'] = $email;
                     }
@@ -1677,9 +1655,25 @@ class AjaxController extends Controller
                 }
 
                 if (!empty($formated_data)) {
-                    foreach ($formated_data as $index => $contact_data) {
-                        //Create new product
-                        Contact::create($contact_data);
+
+                    foreach ($formated_data as $index => $item) {
+                        $exitItem = Contact::where('id', $item['id'])
+                            ->first();
+
+                        if($exitItem && $is_replace === true) {
+                            $dataUpdate = [];
+
+                            foreach ($columnReplace as $value) {
+                                if (isset($item[$value])) {
+                                    $dataUpdate[$value] = $item[$value];
+                                }
+
+                                Contact::where('id', $item['id'])
+                                    ->update($dataUpdate);
+                            }
+                        } else {
+                            Contact::create($item);
+                        }
                     }
                 }
             }

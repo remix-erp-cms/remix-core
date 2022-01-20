@@ -67,7 +67,7 @@ class OpeningStockController extends Controller
                                 ->with(['purchase_lines'])
                                 ->get();
                                 
-            $purchases = [];
+            $purchase = [];
             foreach ($transactions as $transaction) {
                 $purchase_lines = [];
 
@@ -86,7 +86,7 @@ class OpeningStockController extends Controller
                     $purchase_lines[$purchase_line->variation_id][$k]['exp_date'] = $purchase_line->exp_date;
                     $purchase_lines[$purchase_line->variation_id][$k]['lot_number'] = $purchase_line->lot_number;
                 }
-                $purchases[$transaction->location_id] = $purchase_lines;
+                $purchase[$transaction->location_id] = $purchase_lines;
             }
 
             $locations = BusinessLocation::forDropdown($business_id);

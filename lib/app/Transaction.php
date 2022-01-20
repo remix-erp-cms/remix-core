@@ -123,12 +123,12 @@ class Transaction extends Model
 
     public function parent()
     {
-        return $this->hasOne(\App\Transaction::class, 'id', 'recur_parent_id');
+        return $this->hasOne(\App\Transaction::class, 'id', 'ref_no');
     }
 
     public function children()
     {
-        return $this->hasMany(\App\Transaction::class, 'recur_parent_id', 'id');
+        return $this->hasMany(\App\Transaction::class, 'ref_no', 'id');
     }
 
     public function price_group()

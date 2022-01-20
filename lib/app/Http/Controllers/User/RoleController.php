@@ -248,7 +248,7 @@ class RoleController extends Controller
         DB::beginTransaction();
 
         try {
-            $business_id = request()->user()->business_id;
+            $business_id = Auth::guard('api')->user()->business_id;
 
             $role = Role::where('business_id', $business_id)->find($id);
 

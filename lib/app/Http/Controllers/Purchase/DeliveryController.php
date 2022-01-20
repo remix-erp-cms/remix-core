@@ -80,46 +80,62 @@ class DeliveryController extends Controller
             $location_id = $request->location_id;
             $stock_id = $request->stock_id;
             $type = request()->type;
+            $user_id = Auth::guard('api')->user()->id;
 
             $transaction = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
                 'sales_person:id,first_name,user_type',
                 'accountants',
             ])
+                ->leftJoin("contacts", "contacts.id", "=", "transactions.contact_id")
+                ->leftJoin("users", "users.id", "=", "transactions.created_by")
                 ->where('transactions.status', "approve")
                 ->where('transactions.type', "purchase")
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            //Add condition for created_by,used in sales representative sales report
-            if (request()->has('created_by')) {
-                $created_by = request()->get('created_by');
-                if (!empty($created_by)) {
-                    $transaction->where('transactions.created_by', $created_by);
-                }
+            if (!empty($request->id)) {
+                $transaction->where('transactions.invoice_no', "LIKE", "%$request->id%");
+            }
+
+            $view_all = null;
+
+            if(!empty($request->view_all)) {
+                $view_all = $request->view_all;
+            }
+
+            if(!empty($request->header('view-all'))) {
+                $view_all = $request->header('view-all');
+            }
+
+            if (empty($view_all) || $view_all != "1") {
+                $transaction->where('transactions.created_by', $user_id);
+            }
+
+            if (!empty($request->contact_name)) {
+                $transaction->where('contacts.first_name',"LIKE", "%$request->contact_name%");
+            }
+
+            if (!empty($request->employee)) {
+                $transaction->where('users.first_name',"LIKE", "%$request->employee%");
             }
 
             if (!empty($type)) {
                 $transaction->where('transactions.type', $type);
             }
 
-            $start = Carbon::now()->startOfMonth();
-            $end = Carbon::now()->endOfMonth();
-
             if (!empty(request()->start_date)) {
                 $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $transaction->where('transactions.transaction_date', '>=', $start);
             }
 
             if (!empty(request()->end_date)) {
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $transaction->where('transactions.transaction_date', '<=', $end);
             }
-
-
-            $transaction->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end);
 
             $status = request()->status;
 
@@ -142,27 +158,41 @@ class DeliveryController extends Controller
 
             $transaction->groupBy('transactions.id');
             $transaction->orderBy('transactions.updated_at', "desc");
-            $transaction->select();
+
+            $transaction->select("transactions.*");
 
             $data = $transaction->paginate($request->limit);
 
-            $query = DB::table('transactions')
-                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
-                ->where('business_id', $business_id)
-                ->where('location_id', $location_id)
-                ->where('transactions.status', "approve")
-                ->where('transactions.type', "purchase")
-                ->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end)
-                ->groupBy('status');
+//            $query = DB::table('transactions')
+//                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
+//                ->where('business_id', $business_id)
+//                ->where('location_id', $location_id)
+//                ->where('transactions.status', "approve")
+//                ->where('transactions.type', "purchase")
+//                ->groupBy('status');
+//
+//            if (!empty($type)) {
+//                $query->where('transactions.type', $type);
+//            }
+//
+//            if (empty($view_all) || $view_all != "1") {
+//                $query->where('transactions.created_by', $user_id);
+//            }
+//
+//            if (!empty(request()->start_date)) {
+//                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+//                $query->where('transactions.transaction_date', '>=', $start);
+//            }
+//
+//            if (!empty(request()->end_date)) {
+//                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+//                $query->where('transactions.transaction_date', '<=', $end);
+//            }
+//
+//
+//            $summary = $query->get();
 
-            if (!empty($type)) {
-                $query->where('transactions.type', $type);
-            }
-
-            $summary = $query->get();
-
-            return $this->respondSuccess($data, null, ["summary" => $summary]);
+            return $this->respondSuccess($data, null);
         } catch (\Exception $e) {
 //            dd($e);
             $message = $e->getMessage();
@@ -187,7 +217,7 @@ class DeliveryController extends Controller
                     'stock.location:id,name,landmark',
                     'purchase_lines',
                     'purchase_lines.product:id,sku,name,contact_id,unit_id',
-                    'purchase_lines.product.contact:id,name',
+                    'purchase_lines.product.contact:id,first_name',
                     'purchase_lines.product.unit:id,actual_name',
                     'purchase_lines.variations',
                     'purchase_lines.variations.product_variation',

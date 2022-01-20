@@ -45,6 +45,18 @@ class AjaxController extends Controller
      */
     public function getProfile()
     {
+        if (!$business_id = Auth::guard('api')->user()) {
+            $data = [
+                'success' => false,
+                'msg' => "Phiên đăng nhập thất bại",
+                'data' => null,
+                'code' => 401,
+                'errors' => []
+            ];
+
+            return response()->json($data, 200);
+        }
+
         $user_id = Auth::guard('api')->user()->id;
         $user = User::where('id', $user_id)
             ->with([

@@ -82,7 +82,7 @@ class OrderController extends Controller
             $stock_id = $request->stock_id;
 
             $purchase = Transaction::with([
-                'contact:id,name,mobile,email,tax_number,type',
+                'contact:id,first_name,mobile,email,tax_number,type',
                 'location:id,location_id,name,landmark',
                 'business:id,name',
                 'tax:id,name,amount',
@@ -93,11 +93,8 @@ class OrderController extends Controller
                 ->where('transactions.location_id', $location_id)
                 ->where('transactions.business_id', $business_id);
 
-            if (request()->has('id')) {
-                $id = request()->get('id');
-                if (!empty($id)) {
-                    $purchase->where('transactions.id', $id);
-                }
+            if (!empty($request->id)) {
+                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
             }
 
             //Add condition for created_by,used in sales representative sales report
@@ -114,20 +111,15 @@ class OrderController extends Controller
                 $purchase->where('transactions.contact_id', $contact_id);
             }
 
-            $start = Carbon::now()->startOfMonth();
-            $end = Carbon::now()->endOfMonth();
-
             if (!empty(request()->start_date)) {
                 $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $purchase->where('transactions.transaction_date', '>=', $start);
             }
 
             if (!empty(request()->end_date)) {
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $purchase->where('transactions.transaction_date', '<=', $end);
             }
-
-
-            $purchase->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end);
 
             $status = request()->status;
 
@@ -162,9 +154,17 @@ class OrderController extends Controller
                 ->where('business_id', $business_id)
                 ->where('location_id', $location_id)
                 ->where('type', "sell")
-                ->whereDate('transactions.transaction_date', '>=', $start)
-                ->whereDate('transactions.transaction_date', '<=', $end)
                 ->groupBy('status');
+
+            if (!empty(request()->start_date)) {
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $summary->where('transactions.transaction_date', '>=', $start);
+            }
+
+            if (!empty(request()->end_date)) {
+                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+                $summary->where('transactions.transaction_date', '<=', $end);
+            }
 
             if (!empty($res_order_status) && count($res_order_status) > 0) {
                 $summary->whereIn('transactions.res_order_status', $res_order_status);
@@ -326,7 +326,7 @@ class OrderController extends Controller
                     'stock:id,stock_name,stock_type,location_id',
                     'stock.location:id,name,landmark',
                     'sell_lines.product:id,sku,barcode,name,contact_id,unit_id',
-                    'sell_lines.product.contact:id,name',
+                    'sell_lines.product.contact:id,first_name',
                     'sell_lines.product.unit:id,actual_name',
                     'sell_lines.product.stock_products',
                     'sell_lines.variations',
