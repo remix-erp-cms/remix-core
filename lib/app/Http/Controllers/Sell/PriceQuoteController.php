@@ -61,8 +61,10 @@ class PriceQuoteController extends Controller
         $this->moduleUtil = $moduleUtil;
         $this->productUtil = $productUtil;
 
-        $this->dummyPaymentLine = ['method' => '', 'amount' => 0, 'note' => '', 'card_transaction_number' => '', 'card_number' => '', 'card_type' => '', 'card_holder_name' => '', 'card_month' => '', 'card_year' => '', 'card_security' => '', 'cheque_number' => '', 'bank_account_number' => '',
-            'is_return' => 0, 'transaction_no' => ''];
+        $this->dummyPaymentLine = [
+            'method' => '', 'amount' => 0, 'note' => '', 'card_transaction_number' => '', 'card_number' => '', 'card_type' => '', 'card_holder_name' => '', 'card_month' => '', 'card_year' => '', 'card_security' => '', 'cheque_number' => '', 'bank_account_number' => '',
+            'is_return' => 0, 'transaction_no' => ''
+        ];
 
         $this->shipping_status_colors = [
             'ordered' => 'bg-yellow',
@@ -97,17 +99,17 @@ class PriceQuoteController extends Controller
                 ->where('transactions.business_id', $business_id);
 
             if (!empty($request->id)) {
-                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
+                $purchase->where('transactions.invoice_no', "LIKE", "%$request->id%");
             }
 
             //Add condition for created_by,used in sales representative sales report
             $view_all = null;
 
-            if(!empty($request->view_all)) {
+            if (!empty($request->view_all)) {
                 $view_all = $request->view_all;
             }
 
-            if(!empty($request->header('view-all'))) {
+            if (!empty($request->header('view-all'))) {
                 $view_all = $request->header('view-all');
             }
 
@@ -116,11 +118,11 @@ class PriceQuoteController extends Controller
             }
 
             if (!empty($request->contact_name)) {
-                $purchase->where('contacts.first_name',"LIKE", "%$request->contact_name%");
+                $purchase->where('contacts.first_name', "LIKE", "%$request->contact_name%");
             }
 
             if (!empty($request->employee)) {
-                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
+                $purchase->where('users.first_name', "LIKE", "%$request->employee%");
             }
 
             $contact_id = request()->get('contact_id');
@@ -129,7 +131,7 @@ class PriceQuoteController extends Controller
             }
 
             if (!empty(request()->start_date)) {
-                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date)->toDateString();
                 $purchase->where('transactions.transaction_date', '>=', $start);
             }
 
@@ -165,37 +167,37 @@ class PriceQuoteController extends Controller
 
             $data = $purchase->paginate($request->limit);
 
-//            $summary = DB::table('transactions')
-//                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
-//                ->where('business_id', $business_id)
-//                ->where('location_id', $location_id)
-//                ->where('type', "price_quote")
-//                ->groupBy('status');
-//
-//
-//            if (empty($view_all) || $view_all != "1") {
-//                $summary->where('transactions.created_by', $user_id);
-//            }
-//
-//            if (!empty(request()->start_date)) {
-//                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
-//                $summary->where('transactions.transaction_date', '>=', $start);
-//            }
-//
-//            if (!empty(request()->end_date)) {
-//                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
-//                $summary->where('transactions.transaction_date', '<=', $end);
-//            }
-//
-//            if (!empty($res_order_status) && count($res_order_status) > 0) {
-//                $summary->whereIn('transactions.res_order_status', $res_order_status);
-//            } else if (!empty($res_order_status) && $res_order_status != "all") {
-//                $summary->where('transactions.res_order_status', $res_order_status);
-//            }
+            //            $summary = DB::table('transactions')
+            //                ->select(DB::raw('sum(final_total) as final_total, count(*) as total, status'))
+            //                ->where('business_id', $business_id)
+            //                ->where('location_id', $location_id)
+            //                ->where('type', "price_quote")
+            //                ->groupBy('status');
+            //
+            //
+            //            if (empty($view_all) || $view_all != "1") {
+            //                $summary->where('transactions.created_by', $user_id);
+            //            }
+            //
+            //            if (!empty(request()->start_date)) {
+            //                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+            //                $summary->where('transactions.transaction_date', '>=', $start);
+            //            }
+            //
+            //            if (!empty(request()->end_date)) {
+            //                $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
+            //                $summary->where('transactions.transaction_date', '<=', $end);
+            //            }
+            //
+            //            if (!empty($res_order_status) && count($res_order_status) > 0) {
+            //                $summary->whereIn('transactions.res_order_status', $res_order_status);
+            //            } else if (!empty($res_order_status) && $res_order_status != "all") {
+            //                $summary->where('transactions.res_order_status', $res_order_status);
+            //            }
 
             return $this->respondSuccess($data, null);
         } catch (\Exception $e) {
-//            dd($e);
+            //            dd($e);
             $message = $e->getMessage();
 
             return $this->respondWithError($message, [], 500);
@@ -238,17 +240,17 @@ class PriceQuoteController extends Controller
                 );
 
             if (!empty($request->id)) {
-                $purchase->where('transactions.invoice_no',"LIKE", "%$request->id%");
+                $purchase->where('transactions.invoice_no', "LIKE", "%$request->id%");
             }
 
             //Add condition for created_by,used in sales representative sales report
             $view_all = null;
 
-            if(!empty($request->view_all)) {
+            if (!empty($request->view_all)) {
                 $view_all = $request->view_all;
             }
 
-            if(!empty($request->header('view-all'))) {
+            if (!empty($request->header('view-all'))) {
                 $view_all = $request->header('view-all');
             }
 
@@ -264,11 +266,11 @@ class PriceQuoteController extends Controller
 
             $contact_name = request()->get('contact_name');
             if (!empty($contact_name)) {
-                $purchase->where('contacts.first_name',"LIKE", "%$contact_name%");
+                $purchase->where('contacts.first_name', "LIKE", "%$contact_name%");
             }
 
             if (!empty($request->employee)) {
-                $purchase->where('users.first_name',"LIKE", "%$request->employee%");
+                $purchase->where('users.first_name', "LIKE", "%$request->employee%");
             }
 
             $status = request()->status;
@@ -303,7 +305,6 @@ class PriceQuoteController extends Controller
             if (!empty(request()->end_date)) {
                 $end = Carbon::createFromFormat('d/m/Y', request()->end_date);
                 $purchase->whereDate('transactions.created_at', '<=', $end);
-
             }
 
             $payment_status = request()->payment_status;
@@ -325,7 +326,7 @@ class PriceQuoteController extends Controller
 
             return $this->respondSuccess($data, null);
         } catch (\Exception $e) {
-//            dd($e);
+            //            dd($e);
             $message = $e->getMessage();
 
             return $this->respondWithError($message, [], 500);
@@ -465,10 +466,10 @@ class PriceQuoteController extends Controller
             $discount = null;
 
             if (isset($transaction_data['discount_type']) && $transaction_data['discount_type']) {
-                $discount = ['discount_type' => $transaction_data['discount_type'],
+                $discount = [
+                    'discount_type' => $transaction_data['discount_type'],
                     'discount_amount' => $transaction_data['discount_amount']
                 ];
-
             }
 
             $tax_rate_id = null;
@@ -490,7 +491,7 @@ class PriceQuoteController extends Controller
             $dataLog = [
                 'created_by' => $user_id,
                 'business_id' => $business_id,
-                'log_name' => "Tạo đơn bán hàng",
+                'log_name' => "Tạo đơn báo giá",
                 'subject_id' => $transaction->id
             ];
 
@@ -683,6 +684,34 @@ class PriceQuoteController extends Controller
 
             $transaction = Transaction::findOrFail($id);
 
+            if (!$transaction) {
+                return $this->respondWithError("Không tìm thấy đơn hàng", [], 500);
+            }
+
+            $products = TransactionSellLine::where("transaction_id", $transaction->id)->get();
+
+
+            foreach ($products as $item) {
+                $msgLog = "";
+                $productStockExit = StockProduct::where("product_id", $item->product_id)
+                    ->first();
+
+                if ($productStockExit) {
+                    if ($productStockExit->unit_price != $item->unit_price) {
+                        $msgLog .= ";Báo giá bán sản phẩm là  " . number_format($item->unit_price);
+                    }
+
+                    $dataLogProduct = [
+                        'created_by' => $user_id,
+                        'business_id' => $business_id,
+                        'log_name' => "Cập nhật trạng thái báo giá sản phẩm",
+                        'subject_id' =>  $item->product_id
+                    ];
+
+                    Activity::history($msgLog, "product", $dataLogProduct);
+                }
+            }
+
             $transaction->status = "approve";
 
             $transaction->save();
@@ -690,11 +719,11 @@ class PriceQuoteController extends Controller
             $dataLog = [
                 'created_by' => $user_id,
                 'business_id' => $business_id,
-                'log_name' => "Cập nhật trạng thái cầu mua hàng",
+                'log_name' => "Cập nhật trạng thái báo giá",
                 'subject_id' => $id
             ];
 
-            $message = "Chuyển trạng thái mua hàng thành đã được duyệt";
+            $message = "Chuyển trạng thái báo giá thành đã được duyệt";
 
             Activity::history($message, "price_quote", $dataLog);
 
@@ -908,10 +937,10 @@ class PriceQuoteController extends Controller
             $discount = null;
 
             if (isset($input['discount_type']) && $input['discount_type']) {
-                $discount = ['discount_type' => $input['discount_type'],
+                $discount = [
+                    'discount_type' => $input['discount_type'],
                     'discount_amount' => $input['discount_amount']
                 ];
-
             }
 
             $tax_rate_id = null;
@@ -1100,5 +1129,4 @@ class PriceQuoteController extends Controller
             return false;
         }
     }
-
 }

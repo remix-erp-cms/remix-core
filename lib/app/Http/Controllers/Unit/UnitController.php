@@ -251,18 +251,12 @@ class UnitController extends Controller
                 $imported_data = array_splice($parsed_array[0], 1);
 
                 $formated_data = [];
+                $prices_data = [];
 
                 $is_valid = true;
                 $error_msg = '';
-                $is_replace = false;
-                $columnReplace = [];
 
-                if(isset($request->column_select) && $request->column_select) {
-                    $columnReplace = explode(',', $request->column_select);
-                    if (count($columnReplace) > 0) {
-                        $is_replace = true;
-                    }
-                }
+                $total_rows = count($imported_data);
 
                 foreach ($imported_data as $key => $value) {
                     //Check if any column is missing
@@ -277,16 +271,20 @@ class UnitController extends Controller
                     $unit_array['business_id'] = $business_id;
                     $unit_array['created_by'] = $user_id;
 
-
-                    //Add id
-                    $id = trim($value[0]);
-
-                    $unit_array['id'] = $id;
-
+             
                     //Add SKU
-                    $actual_name = trim($value[1]);
+                    $actual_name = trim($value[0]);
                     if (!empty($actual_name)) {
                         $unit_array['actual_name'] = $actual_name;
+                        //Check if product with same SKU already exist
+                        $is_exist = Unit::where('actual_name', $unit_array['actual_name'])
+                            ->where('business_id', $business_id)
+                            ->exists();
+                        if ($is_exist) {
+                            $is_valid = false;
+                            $error_msg = "Tên đơn vị : $actual_name đã tồn tại ở dòng thứ. $row_no";
+                            break;
+                        }
                     } else {
                         $is_valid = false;
                         $error_msg = "Thiếu tên đơn vị";
@@ -294,7 +292,7 @@ class UnitController extends Controller
                     }
 
                     //Add product name
-                    $short_name = trim($value[2]);
+                    $short_name = trim($value[1]);
                     if (!empty($short_name)) {
                         $unit_array['short_name'] = $short_name;
                     } else {
@@ -311,24 +309,9 @@ class UnitController extends Controller
                 }
 
                 if (!empty($formated_data)) {
-                    foreach ($formated_data as $index => $item) {
-                        $exitItem = Unit::where('id', $item['id'])
-                            ->first();
-
-                        if($exitItem && $is_replace === true) {
-                            $dataUpdate = [];
-
-                            foreach ($columnReplace as $value) {
-                                if (isset($item[$value])) {
-                                    $dataUpdate[$value] = $item[$value];
-                                }
-
-                                Unit::where('id', $item['id'])
-                                    ->update($dataUpdate);
-                            }
-                        } else {
-                            Unit::create($item);
-                        }
+                    foreach ($formated_data as $index => $unit_data) {
+                        //Create new product
+                        Unit::create($unit_data);
                     }
                 }
             }

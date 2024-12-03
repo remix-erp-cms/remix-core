@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Product;
 
+use App\ActivityHistory;
 use App\Brands;
 use App\Business;
 use App\BusinessLocation;
@@ -66,8 +67,10 @@ class ProductController extends Controller
         //barcode types
         $this->barcode_types = $this->productUtil->barcode_types();
 
-        $this->dummyPaymentLine = ['method' => 'cash', 'amount' => 0, 'note' => '', 'card_transaction_number' => '', 'card_number' => '', 'card_type' => '', 'card_holder_name' => '', 'card_month' => '', 'card_year' => '', 'card_security' => '', 'cheque_number' => '', 'bank_account_number' => '',
-            'is_return' => 0, 'transaction_no' => ''];
+        $this->dummyPaymentLine = [
+            'method' => 'cash', 'amount' => 0, 'note' => '', 'card_transaction_number' => '', 'card_number' => '', 'card_type' => '', 'card_holder_name' => '', 'card_month' => '', 'card_year' => '', 'card_security' => '', 'cheque_number' => '', 'bank_account_number' => '',
+            'is_return' => 0, 'transaction_no' => ''
+        ];
     }
 
     /**
@@ -97,7 +100,7 @@ class ProductController extends Controller
             $data = $this->getListAllProduct($request, $business_id);
             return $this->respondSuccess($data);
         } catch (\Exception $e) {
-//            dd($e);
+            //            dd($e);
             $message = $e->getMessage();
 
             return $this->respondWithError($message, [], 500);
@@ -117,7 +120,8 @@ class ProductController extends Controller
             ->where('transactions.contact_id', $contact_id)
             ->select(
                 'transaction_sell_lines.product_id',
-                DB::raw('MAX(transaction_sell_lines.id) as id'))
+                DB::raw('MAX(transaction_sell_lines.id) as id')
+            )
             ->groupBy('transaction_sell_lines.product_id');
         $stock_id = request()->get('stock_id', null);
 
@@ -130,7 +134,7 @@ class ProductController extends Controller
                 '=',
                 'tsl2.id'
             )
-            ->leftJoin("stock_products", function ($join) use($stock_id) {
+            ->leftJoin("stock_products", function ($join) use ($stock_id) {
                 $join->on('stock_products.product_id', '=', 'products.id');
                 $join->on('stock_products.stock_id', '=', DB::raw($stock_id));
             })
@@ -268,14 +272,15 @@ class ProductController extends Controller
         $sort_field = "products.created_at";
         $sort_des = "desc";
 
-        if(isset($request->order_field) && $request->order_field) {
+        if (isset($request->order_field) && $request->order_field) {
             $sort_field = $request->order_field;
         }
 
-        if(isset($request->order_by) && $request->order_by) {
+        if (isset($request->order_by) && $request->order_by) {
             $sort_des = $request->order_by;
         }
 
+        $products->orderBy("products.updated_at", "desc");
         $products->orderBy($sort_field, $sort_des);
 
         $data = $products->paginate($request->limit);
@@ -287,7 +292,7 @@ class ProductController extends Controller
     {
         $stock_id = request()->get('stock_id', null);
         $query = Product::where('products.business_id', $business_id)
-            ->leftJoin("stock_products", function ($join) use($stock_id) {
+            ->leftJoin("stock_products", function ($join) use ($stock_id) {
                 $join->on('stock_products.product_id', '=', 'products.id');
                 $join->on('stock_products.stock_id', '=', DB::raw($stock_id));
             })
@@ -445,14 +450,15 @@ class ProductController extends Controller
         $sort_field = "products.created_at";
         $sort_des = "desc";
 
-        if(isset($request->order_field) && $request->order_field) {
+        if (isset($request->order_field) && $request->order_field) {
             $sort_field = $request->order_field;
         }
 
-        if(isset($request->order_by) && $request->order_by) {
+        if (isset($request->order_by) && $request->order_by) {
             $sort_des = $request->order_by;
         }
 
+        $products->orderBy("products.updated_at", "desc");
         $products->orderBy($sort_field, $sort_des);
         $data = $products->paginate($request->limit);
         return $data;
@@ -665,7 +671,7 @@ class ProductController extends Controller
                 }
             }
 
-            $message = "Thêm sản phẩm '" . $request->input("name") . "' thhành công";
+            $message = "Thêm sản phẩm '" . $request->input("name") . "' thành công";
             $dataLog = [
                 'created_by' => $user_id,
                 'business_id' => $business_id,
@@ -713,6 +719,13 @@ class ProductController extends Controller
                     "product_serial:id,product_id,serial,is_sell"
                 ])
                 ->first();
+
+            if ($product) {
+                $logs = ActivityHistory::with(["created_by"])
+                    ->where("subject_type", "product")
+                    ->where("subject_id", $product->id)->get();
+                $product->logs = $logs;
+            }
 
             return $this->respondSuccess($product);
         } catch (\Exception $e) {
@@ -880,6 +893,8 @@ class ProductController extends Controller
                 }
             }
 
+            $logName = "Cập nhật sản phẩm " . $product->name;
+
             $priceData = $request->priceData;
             if (!empty($priceData) && count($priceData) > 0) {
                 $status = "pending";
@@ -897,6 +912,24 @@ class ProductController extends Controller
                         'status' => $status,
                         'updated_at' => now(),
                     ];
+
+                    $productStockExit = StockProduct::where("product_id", $product->id)
+                        ->where("stock_id", $item["id"])
+                        ->first();
+
+                    if ($productStockExit) {
+                        if ($productStockExit->quantity != $item["quantity"]) {
+                            $logName .= ";Thay đổi số lượng thành  " . number_format($item["quantity"]);
+                        }
+
+                        if ($productStockExit->unit_price != $item["sell_price"]) {
+                            $logName .= ";Thay đổi giá bán thành  " . number_format($item["sell_price"]);
+                        }
+
+                        if ($productStockExit->purchase_price != $item["purchase_price"]) {
+                            $logName .= ";Thay đổi giá mua thành  " . number_format($item["purchase_price"]);
+                        }
+                    }
 
                     $productStock = StockProduct::where("product_id", $product->id)
                         ->where("stock_id", $item["id"])
@@ -1080,8 +1113,18 @@ class ProductController extends Controller
             $product->save();
             $product->touch();
 
-            DB::commit();
+            $dataLog = [
+                'created_by' => $user_id,
+                'business_id' => $business_id,
+                'log_name' => "Cập nhật sản phẩm",
+                'subject_id' => $id
+            ];
+
             $message = "Cập nhật sản phẩm thành công";
+
+            Activity::history($logName, "product", $dataLog);
+
+            DB::commit();
 
             return $this->respondSuccess($product, $message);
         } catch (\Exception $e) {
@@ -1152,6 +1195,7 @@ class ProductController extends Controller
 
         try {
             $business_id = Auth::guard('api')->user()->business_id;
+            $user_id = Auth::guard('api')->user()->user_id;
 
             $can_be_deleted = true;
             $error_msg = '';
@@ -1216,19 +1260,30 @@ class ProductController extends Controller
                         ->delete();
                     $product->delete();
 
-                    DB::commit();
+                    $dataLog = [
+                        'created_by' => $user_id,
+                        'business_id' => $business_id,
+                        'log_name' => "Xóa sản phẩm " . $product->name,
+                        'subject_id' => $id
+                    ];
+
                     $message = "Xóa sản phẩm thành công";
+
+                    Activity::history($message, "product", $dataLog);
+
+                    DB::commit();
 
                     return $this->respondSuccess($product, $message);
                 }
             }
+
+
             return $this->respondWithError($error_msg, [], 500);
         } catch (\Exception $e) {
             $message = $e->getMessage();
 
             return $this->respondWithError($message, [], 500);
         }
-
     }
 
     public function importData(Request $request)
@@ -1259,7 +1314,7 @@ class ProductController extends Controller
 
                 $total_rows = count($imported_data);
 
-                if(isset($request->column_select) && $request->column_select) {
+                if (isset($request->column_select) && $request->column_select) {
                     $columnReplace = explode(',', $request->column_select);
                     if (count($columnReplace) > 0) {
                         $is_replace = true;
@@ -1426,7 +1481,7 @@ class ProductController extends Controller
                             ->where('business_id', $business_id)
                             ->first();
 
-                        if($prodItem && $is_replace === true) {
+                        if ($prodItem && $is_replace === true) {
                             $dataProductUpdate = [];
                             $dataPriceUpdate = [];
 
@@ -1472,6 +1527,4 @@ class ProductController extends Controller
             return $this->respondWithError($message, [], 500);
         }
     }
-
-
 }

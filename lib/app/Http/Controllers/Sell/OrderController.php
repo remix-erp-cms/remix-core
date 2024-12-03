@@ -145,7 +145,7 @@ class OrderController extends Controller
             }
 
             if (!empty(request()->start_date)) {
-                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date)->toDateString();
                 $transaction->where('transactions.transaction_date', '>=', $start);
             }
 

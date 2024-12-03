@@ -113,7 +113,7 @@ class OrderController extends Controller
             }
 
             if (!empty(request()->start_date)) {
-                $start = Carbon::createFromFormat('d/m/Y', request()->start_date);
+                $start = Carbon::createFromFormat('d/m/Y', request()->start_date)->toDateString();
                 $purchase->where('transactions.transaction_date', '>=', $start);
             }
 
@@ -340,7 +340,7 @@ class OrderController extends Controller
             $purchase_lines = [];
             $purchase->ref_no = $id;
 
-            foreach ($purchase->sell_lines as $key => $value) {
+              foreach ($purchase->sell_lines as $key => $value) {
                 if ($value->quantity_adjusted > 0) {
                     $temp = $value;
                     $temp["quantity"] = $value->quantity_adjusted;

@@ -265,7 +265,7 @@ class OrderController extends Controller
                     'transactions.staff_note as staff_note',
                     'contacts.id as contact_id',
                     'contacts.name as contact_name',
-                    'contacts.address_line_1 as contact_address',
+				  	'contacts.address_line_1 as contact_address',
                     'contacts.tax_number as tax_number',
                     'products.name as product_name',
                     'tl1.invoice_no as ref_no',
@@ -536,7 +536,6 @@ class OrderController extends Controller
             $tax_rate_id = null;
             if (isset($transaction_data['tax_rate_id']) && $transaction_data['tax_rate_id']) {
                 $tax_rate_id = $transaction_data['tax_rate_id'] ?? null;
-                $transaction_data['tax_id'] = $tax_rate_id;
             }
 
             $shippingCharge = 0;
@@ -553,6 +552,7 @@ class OrderController extends Controller
                 $transaction_data['discount_amount'] = isset($invoice_total["discount"]) ? $invoice_total["discount"] : 0;
                 $transaction_data['tax_amount'] = isset($invoice_total["tax"]) ? $invoice_total["tax"] : 0;
                 $transaction_data['final_total'] = isset($invoice_total["final_total"]) ? $invoice_total["final_total"] : 0;
+
 
                 $transaction = Transaction::create($transaction_data);
 
@@ -595,7 +595,6 @@ class OrderController extends Controller
                     $dataChildTransaction['total_before_tax'] = isset($invoice_total["total_before_tax"]) ? $invoice_total["total_before_tax"] : 0;
                     $dataChildTransaction['discount_amount'] = isset($invoice_total["discount"]) ? $invoice_total["discount"] : 0;
                     $dataChildTransaction['tax_amount'] = isset($invoice_total["tax"]) ? $invoice_total["tax"] : 0;
-                    $dataChildTransaction['final_total'] = isset($invoice_total["final_total"]) ? $invoice_total["final_total"] : 0;
                     $dataChildTransaction['final_total'] = isset($invoice_total["final_total"]) ? $invoice_total["final_total"] : 0;
 
                     $transaction = Transaction::create($dataChildTransaction);
@@ -1144,7 +1143,7 @@ class OrderController extends Controller
         }
     }
 
-    public function update(Request $request, $id)
+       public function update(Request $request, $id)
     {
         DB::beginTransaction();
         try {
@@ -1271,6 +1270,7 @@ class OrderController extends Controller
             return $this->respondWithError($message, [], 500);
         }
     }
+
 
     public function delete($id)
     {

@@ -695,7 +695,7 @@ class ProductUtil extends Util
         $output = [
             'total_before_tax' => 0,
             'tax' => 0,
-            'discount' => $discount['discount_amount'],
+            'discount' => 0,
             'final_total' => 0,
             'profit_total' => 0,
             'shipping_charges' => 0
@@ -711,9 +711,11 @@ class ProductUtil extends Util
         }
 
         //Calculate discount
-        $discountAmount = $this->num_uf($discount['discount_amount']);
+        $discountAmount = 0;
 
         if (!empty($discount) && is_array($discount)) {
+			
+			$output['discount'] = $discount['discount_amount'];
             if ($discount['discount_type'] == 'fixed') {
                 $discountAmount = $this->num_uf($discount['discount_amount']);
             } else {
@@ -732,7 +734,7 @@ class ProductUtil extends Util
         }
 
         //Calculate total
-        $output['final_total'] = $output['total_before_tax'] + $output['tax'] + $output['shipping_charges'] - $discountAmount;
+        $output['final_total'] = $output['total_before_tax'] + $output['tax'] - $discountAmount;
 
         return $output;
     }
@@ -1329,7 +1331,7 @@ class ProductUtil extends Util
      *
      * @return array
      */
-    public function createOrUpdatePurchaseLines(
+   public function createOrUpdatePurchaseLines(
         $transaction,
         $input_data,
         $currency_details,

@@ -148,6 +148,7 @@ class TransactionUtil extends Util
         $update_date = [
             'invoice_no' => $invoice_no,
             'contact_id' => !empty($input['contact_id']) ? $input['contact_id'] : null,
+			 'location_id' => !empty($input['location_id']) ? $input['location_id'] : null,
             'customer_group_id' => !empty($input['customer_group_id']) ? $input['customer_group_id'] : null,
             'total_before_tax' => $invoice_total['total_before_tax'],
             'tax_id' => !empty($input['tax_rate_id']) ? $input['tax_rate_id'] : null,
